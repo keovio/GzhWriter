@@ -90,7 +90,15 @@ struct IdeasView: View {
         let existing = store.data.ideas.map(\.title) + store.data.articles.map(\.displayTitle)
         busy.run("正在想选题…") {
             let r = try await store.runJSON(.topic, IdeasReply.self, Prompts.ideas(direction: dir, avoid: avoid, existing: existing))
-            store.data.ideas.insert(contentsOf: r.ideas.map { TopicIdea(title: $0.title, angle: $0.angle ?? "") }, at: 0)
+            // 去重：和写过 / 记下的太像就不要
+            var pool = existing
+            var fresh: [TopicIdea] = []
+            for i in r.ideas {
+                if let near = Dedupe.closest(i.title, in: pool), near.1 >= Dedupe.threshold { continue }
+                pool.append(i.title)
+                fresh.append(TopicIdea(title: i.title, angle: i.angle ?? ""))
+            }
+            store.data.ideas.insert(contentsOf: fresh, at: 0)
             store.save()
         }
     }
