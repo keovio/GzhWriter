@@ -59,7 +59,7 @@ enum Publisher {
         for item in plan.images ?? [] {
             let idx = item.section - 1
             guard idx >= 0, idx < a.sections.count else { continue }
-            log("画第 \(item.section) 节配图")
+            log("画第 \(item.section) 部分的配图")
             do {
                 let d = try await ImageGen.generate(conn, prompt: item.prompt + "，\(store.data.auto.imageStyle)，无文字", size: .section)
                 let name = ImageStore.save(d, id)
@@ -68,7 +68,7 @@ enum Publisher {
                     if let k = art.sections.firstIndex(where: { $0.id == secId }) { art.sections[k].image = name }
                 }
             } catch {
-                log("第 \(item.section) 节配图失败：\(error.localizedDescription)")
+                log("第 \(item.section) 部分配图失败：\(error.localizedDescription)")
             }
         }
     }
@@ -114,7 +114,7 @@ enum Publisher {
         var out = ""
         let intro = v.intro.trimmingCharacters(in: .whitespacesAndNewlines)
         for (i, sec) in a.sections.enumerated() {
-            if !sec.heading.isEmpty { out += "<h2>\(Layout.esc(sec.heading))</h2>" }
+            if !sec.heading.isEmpty, ArticleKind.of(a.kind).showsHeadings { out += "<h2>\(Layout.esc(sec.heading))</h2>" }
             var paras = Layout.paragraphs(sec.body)
             if i == 0, !intro.isEmpty, !paras.isEmpty { paras[0] = intro }
             for p in paras {
@@ -129,7 +129,7 @@ enum Publisher {
         var out: [String] = []
         let intro = v.intro.trimmingCharacters(in: .whitespacesAndNewlines)
         for (i, sec) in a.sections.enumerated() {
-            if !sec.heading.isEmpty { out.append(sec.heading) }
+            if !sec.heading.isEmpty, ArticleKind.of(a.kind).showsHeadings { out.append(sec.heading) }
             var paras = Layout.paragraphs(sec.body)
             if i == 0, !intro.isEmpty, !paras.isEmpty { paras[0] = intro }
             out += paras.map { $0.replacingOccurrences(of: "**", with: "") }
