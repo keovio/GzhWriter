@@ -62,7 +62,7 @@ enum Layout {
 
         var out = "<section style=\"padding:0 4px;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;\">"
         for (i, sec) in a.sections.enumerated() {
-            if !sec.heading.isEmpty { out += heading(i, sec.heading) }
+            if !sec.heading.isEmpty, ArticleKind.of(a.kind).showsHeadings { out += heading(i, sec.heading) }
             if !sec.image.isEmpty, let src = img?(sec.image) {
                 out += "<p style=\"margin:0 0 1.2em;text-align:center;\"><img src=\"\(src)\" style=\"width:100%;display:block;border-radius:6px;\"></p>"
             }
@@ -124,7 +124,8 @@ enum Layout {
     static func plain(_ a: Article) -> String {
         var s = a.title.isEmpty ? "" : a.title + "\n\n"
         for sec in a.sections {
-            s += sec.heading + "\n\n" + sec.body.replacingOccurrences(of: "**", with: "") + "\n\n"
+            if ArticleKind.of(a.kind).showsHeadings, !sec.heading.isEmpty { s += sec.heading + "\n\n" }
+            s += sec.body.replacingOccurrences(of: "**", with: "") + "\n\n"
         }
         return s
     }
