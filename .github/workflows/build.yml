@@ -1,0 +1,42 @@
+name: Build GzhWriter.app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app (universal)
+        run: |
+          set -o pipefail
+          UNIVERSAL=1 bash build.sh 2>&1 | tee build.log
+
+      - name: Report build errors
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; grep -E "error:|warning: .*will be an error" build.log | head -60; echo; tail -40 build.log; echo '```'; } > report.md
+          gh issue create --title "构建失败 #${{ github.run_number }}" --body-file report.md
+
+      - name: Zip app
+        run: cd build && ditto -c -k --keepParent GzhWriter.app GzhWriter.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" build/GzhWriter.zip \
+            --title "GzhWriter $TAG" \
+            --notes "解压后把 GzhWriter.app 拖进「应用程序」。首次打开若被拦截，在终端运行 xattr -cr /Applications/GzhWriter.app。" \
+            --latest
