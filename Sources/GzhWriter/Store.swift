@@ -16,7 +16,7 @@ final class Store: ObservableObject {
     init() {
         load()
         if data.styles.isEmpty {
-            data.styles = [StylePreset(name: "我的口吻", sample: "", avoid: "")]
+            data.styles = [StylePreset(name: "我的公众号", sample: "", avoid: "")]
         }
     }
 
