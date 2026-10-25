@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum Pane: Hashable {
-    case workbench, ideas, library, styles, models, auto
+    case workbench, ideas, library, styles, models, auto, publish
     case article(UUID)
 }
 
@@ -35,6 +35,7 @@ struct ContentView: View {
         case .styles: StylesView()
         case .models: ModelsView()
         case .auto: AutoSettingsView()
+        case .publish: PublishSettingsView()
         case .article(let id):
             if store.article(id) != nil {
                 ArticleEditor(articleId: id, close: { pane = back }).id(id)
@@ -91,6 +92,7 @@ struct Sidebar: View {
                     item("账号设定", "person.crop.rectangle", .styles)
                     item("模型与分工", "cpu", .models, badge: store.data.connections.isEmpty ? "!" : nil)
                     item("自动化", "bolt", .auto, badge: store.data.auto.dailyEnabled ? "开" : nil)
+                    item("发布与分发", "paperplane", .publish, badge: store.data.wechat.autoPush ? "开" : nil)
 
                     if !recent.isEmpty {
                         group("最近")
