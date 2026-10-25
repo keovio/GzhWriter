@@ -379,7 +379,7 @@ struct ArticleEditor: View {
                     Circle().fill(Color(hex: hex)).frame(width: 22, height: 22)
                         .overlay(Circle().stroke(Color.primary, lineWidth: a.accent == hex ? 2 : 0).padding(-3))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButton())
                 .help(name)
             }
         }
