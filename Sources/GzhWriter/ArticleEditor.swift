@@ -66,6 +66,7 @@ struct ArticleEditor: View {
                             }
                         }
                         .card()
+                        if a.stage == .layout { DistributeCard(articleId: articleId) }
                         if !a.log.isEmpty {
                             DisclosureGroup("运行记录（\(a.log.count) 条）") {
                                 Text(a.log.joined(separator: "\n"))
