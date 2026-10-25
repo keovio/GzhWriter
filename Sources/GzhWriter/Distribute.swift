@@ -247,9 +247,9 @@ struct PublishSettingsView: View {
                 Divider()
                 SettingRow(label: "正文配图频率") {
                     Picker("", selection: au(\.imageEvery)) {
-                        Text("每节一张").tag(1)
-                        Text("每两节一张").tag(2)
-                        Text("每三节一张").tag(3)
+                        Text("每个小标题一张").tag(1)
+                        Text("隔一个小标题一张").tag(2)
+                        Text("隔两个小标题一张").tag(3)
                         Text("只要封面").tag(99)
                     }
                     .labelsHidden().frame(width: 160)
