@@ -16,7 +16,7 @@ enum Stage: Int, Codable, CaseIterable, Identifiable {
 }
 
 /// 正文的一节：一个小标题 + 若干段落（段落之间空一行，支持 **加粗** 和 > 引用）
-struct Section: Identifiable, Codable, Hashable {
+struct ArticleSection: Identifiable, Codable, Hashable {
     var id = UUID()
     var heading: String
     var body: String
@@ -72,7 +72,7 @@ struct Article: Identifiable, Codable, Hashable {
     var material = ""           // 参考素材，只作参考
     var styleId: UUID?
     var outline: [String] = []
-    var sections: [Section] = []
+    var sections: [ArticleSection] = []
     var review: ReviewResult?
     var stage: Stage = .topic
     var template = "magazine"
@@ -98,7 +98,7 @@ struct Article: Identifiable, Codable, Hashable {
         material = (try? c.decode(String.self, forKey: .material)) ?? d.material
         styleId = try? c.decodeIfPresent(UUID.self, forKey: .styleId)
         outline = (try? c.decode([String].self, forKey: .outline)) ?? d.outline
-        sections = (try? c.decode([Section].self, forKey: .sections)) ?? d.sections
+        sections = (try? c.decode([ArticleSection].self, forKey: .sections)) ?? d.sections
         review = try? c.decodeIfPresent(ReviewResult.self, forKey: .review)
         stage = (try? c.decode(Stage.self, forKey: .stage)) ?? d.stage
         template = (try? c.decode(String.self, forKey: .template)) ?? d.template
