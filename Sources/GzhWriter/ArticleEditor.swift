@@ -66,6 +66,10 @@ struct ArticleEditor: View {
                             }
                         }
                         .card()
+                        if a.stage == .review || a.stage == .layout {
+                            TitleCard(articleId: articleId)
+                            ComplianceCard(articleId: articleId)
+                        }
                         if a.stage == .layout { DistributeCard(articleId: articleId) }
                         if !a.log.isEmpty {
                             DisclosureGroup("运行记录（\(a.log.count) 条）") {
@@ -168,6 +172,15 @@ struct ArticleEditor: View {
         }
         .labelsHidden()
         .frame(maxWidth: 240)
+
+        if !store.data.breakdowns.isEmpty {
+            label("参考写法（可选）")
+            Picker("", selection: field(\.refId)) {
+                Text("不参考").tag(UUID?.none)
+                ForEach(store.data.breakdowns) { Text($0.sourceTitle).tag(Optional($0.id)) }
+            }
+            .labelsHidden().frame(maxWidth: 360)
+        }
 
         label("参考素材（可选，只作参考）")
         HStack {
@@ -345,17 +358,6 @@ struct ArticleEditor: View {
                 }
             }
 
-            if !r.titles.isEmpty {
-                label("备选标题")
-                ForEach(r.titles, id: \.self) { t in
-                    HStack {
-                        Text(t)
-                        Spacer()
-                        Button("用这个") { edit { $0.title = t } }.buttonStyle(GhostButton())
-                    }
-                }
-            }
-
             HStack {
                 Spacer()
                 Button("去排版 →") { edit { $0.stage = .layout } }.buttonStyle(PrimaryButton())
@@ -448,7 +450,7 @@ struct ArticleEditor: View {
         let snap = a
         let style = store.style(snap.styleId)
         busy.run("正在生成大纲…") {
-            let r = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(snap, style: style))
+            let r = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(snap, style: style, ref: store.breakdown(snap.refId)))
             edit {
                 if let t = r.title, !t.isEmpty, $0.title.isEmpty { $0.title = t }
                 if $0.kind == "auto", let k = r.kind, let kk = ArticleKind(rawValue: k), kk != .auto { $0.kind = kk.rawValue }
@@ -495,7 +497,7 @@ struct ArticleEditor: View {
         var s2 = snap
         // 大纲和正文节数不一致时，以正文节标题为准
         if s2.outline.count != s2.sections.count { s2.outline = s2.sections.map(\.heading) }
-        let text = try await store.run(.draft, Prompts.section(s2, index: i, style: store.style(snap.styleId)))
+        let text = try await store.run(.draft, Prompts.section(s2, index: i, style: store.style(snap.styleId), ref: store.breakdown(snap.refId)))
         let id = snap.sections[i].id
         edit { art in
             if let k = art.sections.firstIndex(where: { $0.id == id }) { art.sections[k].body = text }
