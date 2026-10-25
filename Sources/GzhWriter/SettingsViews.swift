@@ -14,7 +14,7 @@ struct StylesView: View {
                 }
                 HStack {
                     Button {
-                        let s = StylePreset(name: "新口吻")
+                        let s = StylePreset(name: "新账号")
                         store.data.styles.append(s); store.save(); selected = s.id
                     } label: { Image(systemName: "plus") }
                     Button {
@@ -32,8 +32,13 @@ struct StylesView: View {
                 let b = Binding(get: { store.data.styles[i] }, set: { store.data.styles[i] = $0; store.save() })
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("口吻").font(.title2.bold())
-                        TextField("名称", text: b.name).textFieldStyle(.roundedBorder).frame(maxWidth: 300)
+                        Text("账号设定").font(.title2.bold())
+                        Text("自动选题和写作都按这里来，填得越具体写得越像你。").font(.callout).foregroundStyle(.secondary)
+                        TextField("账号名称", text: b.name).textFieldStyle(.roundedBorder).frame(maxWidth: 300)
+                        Text("赛道").font(.headline)
+                        TextField("比如：公考备考经验、职场成长、母婴好物", text: b.track).textFieldStyle(.roundedBorder)
+                        Text("读者是谁").font(.headline)
+                        TextField("比如：在职备考的 25–35 岁上班族", text: b.audience).textFieldStyle(.roundedBorder)
                         Text("范文").font(.headline)
                         Text("贴一两篇你自己写过、最满意的文章。AI 会模仿口吻和句式，不会照抄内容。")
                             .font(.callout).foregroundStyle(.secondary)
@@ -43,11 +48,14 @@ struct StylesView: View {
                         Text("不写的话题").font(.headline)
                         TextField("用顿号或逗号分隔，比如：明星八卦、股票推荐", text: b.avoid)
                             .textFieldStyle(.roundedBorder)
+                        Text("文末一句话").font(.headline)
+                        TextField("比如：我是小 K，陪你上岸。", text: b.signature)
+                            .textFieldStyle(.roundedBorder)
                     }
                     .padding(20)
                 }
             } else {
-                Text("选一个口吻编辑").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text("选一个账号编辑").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .onAppear { if selected == nil { selected = store.data.styles.first?.id } }
