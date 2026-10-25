@@ -155,6 +155,13 @@ struct ArticleEditor: View {
         hint("写几句你自己的看法、经历或结论。AI 只帮你把它写清楚，这也是平台要求的「真人表达」。")
         editor(field(\.viewpoint), height: 110)
 
+        label("文章类型")
+        Picker("", selection: field(\.kind)) {
+            ForEach(ArticleKind.allCases) { Text($0.name).tag($0.rawValue) }
+        }
+        .pickerStyle(.segmented).labelsHidden()
+        hint(ArticleKind.of(a.kind).hint)
+
         label("账号")
         Picker("", selection: field(\.styleId)) {
             ForEach(store.data.styles) { Text($0.name).tag(Optional($0.id)) }
@@ -199,7 +206,7 @@ struct ArticleEditor: View {
             }
         }
         HStack {
-            TextField("加一节", text: $newOutline).fieldBox().onSubmit(addOutline)
+            TextField("加一个小标题", text: $newOutline).fieldBox().onSubmit(addOutline)
             Button("添加", action: addOutline).buttonStyle(GhostButton()).disabled(newOutline.isEmpty)
         }
         HStack {
@@ -215,9 +222,9 @@ struct ArticleEditor: View {
 
     @ViewBuilder var draftStage: some View {
         HStack {
-            hint("可以逐节让 AI 起草，也可以自己写。写完一定通读一遍，加进你自己的经历和例子。")
+            hint("可以逐个小标题让 AI 起草，也可以自己写。写完一定通读一遍，加进你自己的经历和例子。")
             Spacer()
-            Button("起草所有空白节") { draftAllEmpty() }.buttonStyle(GhostButton())
+            Button("起草所有空白部分") { draftAllEmpty() }.buttonStyle(GhostButton())
                 .disabled(busy.label != nil || !a.sections.contains { $0.body.isEmpty })
         }
         if a.sections.isEmpty {
@@ -236,7 +243,7 @@ struct ArticleEditor: View {
                     editor(sectionField(sec.id, \.body), height: 180)
                     HStack {
                         if sec.body.isEmpty {
-                            Button("AI 起草这一节") { draft(i) }.buttonStyle(GhostButton()).disabled(busy.label != nil)
+                            Button("AI 起草这部分") { draft(i) }.buttonStyle(GhostButton()).disabled(busy.label != nil)
                         } else {
                             Menu("AI 改写") {
                                 ForEach(Prompts.Op.allCases) { op in
@@ -313,7 +320,7 @@ struct ArticleEditor: View {
             ForEach(r.suggestions) { s in
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(s.section.map { "第 \($0) 节" } ?? "全文").font(.caption.bold()).foregroundStyle(.secondary)
+                        Text(s.section.map { "第 \($0) 部分" } ?? "全文").font(.caption.bold()).foregroundStyle(.secondary)
                         Text(s.issue)
                         Text("→ \(s.fix)").foregroundStyle(.secondary)
                     }
@@ -444,6 +451,7 @@ struct ArticleEditor: View {
             let r = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(snap, style: style))
             edit {
                 if let t = r.title, !t.isEmpty, $0.title.isEmpty { $0.title = t }
+                if $0.kind == "auto", let k = r.kind, let kk = ArticleKind(rawValue: k), kk != .auto { $0.kind = kk.rawValue }
                 $0.outline = r.outline
                 $0.stage = .outline
             }
@@ -478,7 +486,7 @@ struct ArticleEditor: View {
     }
 
     func draft(_ i: Int) {
-        busy.run("正在起草第 \(i + 1) 节…") { try await draftOne(i) }
+        busy.run("正在起草第 \(i + 1) 部分…") { try await draftOne(i) }
     }
 
     func draftOne(_ i: Int) async throws {
@@ -495,9 +503,9 @@ struct ArticleEditor: View {
     }
 
     func draftAllEmpty() {
-        busy.run("正在逐节起草…") {
+        busy.run("正在逐个起草…") {
             for i in a.sections.indices where a.sections[i].body.isEmpty {
-                busy.label = "正在起草第 \(i + 1) 节…"
+                busy.label = "正在起草第 \(i + 1) 部分…"
                 try await draftOne(i)
             }
         }
@@ -506,7 +514,7 @@ struct ArticleEditor: View {
     func revise(_ id: UUID, _ instruction: String, label: String) {
         let snap = a
         guard let i = snap.sections.firstIndex(where: { $0.id == id }) else { return }
-        busy.run("正在\(label)第 \(i + 1) 节…") {
+        busy.run("正在\(label)第 \(i + 1) 部分…") {
             let text = try await store.run(.draft, Prompts.revise(snap, index: i, instruction: instruction, style: store.style(snap.styleId)))
             undo[id] = snap.sections[i].body
             edit { art in
@@ -534,7 +542,7 @@ struct ArticleEditor: View {
         let snap = a
         let i = n - 1
         let secId = snap.sections[i].id
-        busy.run("正在按建议修改第 \(n) 节…") {
+        busy.run("正在按建议修改第 \(n) 部分…") {
             let text = try await store.run(.draft, Prompts.revise(snap, index: i,
                 instruction: "问题：\(s.issue)。改法：\(s.fix)。只改和这条建议相关的地方，其余保持原样。",
                 style: store.style(snap.styleId)))
