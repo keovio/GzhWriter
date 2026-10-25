@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum Pane: Hashable {
-    case workbench, ideas, library, styles, models, auto, publish
+    case workbench, ideas, library, breakdown, styles, models, auto, publish
     case article(UUID)
 }
 
@@ -32,6 +32,7 @@ struct ContentView: View {
         case .workbench: WorkbenchView(open: open)
         case .ideas: IdeasView(open: open)
         case .library: LibraryView(open: open)
+        case .breakdown: BreakdownView()
         case .styles: StylesView()
         case .models: ModelsView()
         case .auto: AutoSettingsView()
@@ -88,6 +89,7 @@ struct Sidebar: View {
                     item("工作台", "square.grid.2x2", .workbench, badge: pipeline.running.isEmpty ? nil : "\(pipeline.running.count)")
                     item("选题库", "lightbulb", .ideas, badge: openIdeas == 0 ? nil : "\(openIdeas)")
                     item("稿件库", "doc.text", .library, badge: store.data.articles.isEmpty ? nil : "\(store.data.articles.count)")
+                    item("爆文拆解", "scissors", .breakdown, badge: store.data.breakdowns.isEmpty ? nil : "\(store.data.breakdowns.count)")
                     group("配置")
                     item("账号设定", "person.crop.rectangle", .styles)
                     item("模型与分工", "cpu", .models, badge: store.data.connections.isEmpty ? "!" : nil)
