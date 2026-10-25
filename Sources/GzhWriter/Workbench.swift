@@ -55,16 +55,20 @@ struct WorkbenchView: View {
         let avg = scored.isEmpty ? 0 : scored.reduce(0, +) / scored.count
         let ready = store.data.articles.filter { $0.stage == .layout }.count
         return HStack(spacing: 14) {
-            tile("今日成稿", "\(today.count)", "篇", "\(today.reduce(0) { $0 + $1.wordCount }) 字")
-            tile("本周", "\(week.count)", "篇", "\(week.reduce(0) { $0 + $1.wordCount }) 字")
-            tile("平均分", scored.isEmpty ? "—" : "\(avg)", scored.isEmpty ? "" : "分", "及格线 \(store.data.auto.passScore)")
-            tile("待发布", "\(ready)", "篇", "已排好版")
+            tile(Theme.navy, "doc.text.fill", "今日成稿", "\(today.count)", "篇", "\(today.reduce(0) { $0 + $1.wordCount }) 字")
+            tile(Theme.violet, "calendar", "本周", "\(week.count)", "篇", "\(week.reduce(0) { $0 + $1.wordCount }) 字")
+            tile(Theme.green, "star.fill", "平均分", scored.isEmpty ? "—" : "\(avg)", scored.isEmpty ? "" : "分", "及格线 \(store.data.auto.passScore)")
+            tile(Theme.orange, "paperplane.fill", "待发布", "\(ready)", "篇", "已排好版")
         }
     }
 
-    func tile(_ label: String, _ value: String, _ unit: String, _ foot: String) -> some View {
+    func tile(_ accent: Color, _ icon: String, _ label: String, _ value: String, _ unit: String, _ foot: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(.system(size: 12)).foregroundStyle(Theme.sub)
+            HStack(spacing: 6) {
+                Image(systemName: icon).font(.system(size: 11, weight: .semibold)).foregroundStyle(.white)
+                    .frame(width: 22, height: 22).background(accent, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.sub)
+            }
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value).font(.system(size: 28, weight: .bold, design: .rounded)).foregroundStyle(Theme.ink)
                 Text(unit).font(.system(size: 12)).foregroundStyle(Theme.sub)
@@ -72,6 +76,9 @@ struct WorkbenchView: View {
             Text(foot).font(.system(size: 11)).foregroundStyle(Theme.faint)
         }
         .card(padding: 16)
+        .overlay(alignment: .top) {
+            RoundedRectangle(cornerRadius: 2).fill(accent).frame(height: 3).padding(.horizontal, 16)
+        }
     }
 
     // MARK: 一键成稿
@@ -103,9 +110,9 @@ struct WorkbenchView: View {
                                 Text("\(n)").font(.system(size: 12, weight: .medium))
                                     .frame(width: 32, height: 24)
                                     .foregroundStyle(count == n ? .white : Theme.ink)
-                                    .background(count == n ? Theme.navy : Color.clear)
+                                    .background(count == n ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Color.clear))
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowButton())
                         }
                     }
                     .background(Theme.sheet)
@@ -167,7 +174,7 @@ struct WorkbenchView: View {
                     .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(RowButton())
             }
         }
         .card()
@@ -294,7 +301,7 @@ struct ArticleRow: View {
             .background(RoundedRectangle(cornerRadius: 8).fill(hover ? Theme.bg : Color.clear))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowButton())
         .onHover { hover = $0 }
     }
 
@@ -338,7 +345,7 @@ struct LibraryView: View {
                 .frame(maxWidth: 320)
                 ForEach(Array(["全部", "待发布", "写作中"].enumerated()), id: \.offset) { i, t in
                     Button(t) { filter = i }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowButton())
                         .font(.system(size: 12, weight: filter == i ? .semibold : .regular))
                         .foregroundStyle(filter == i ? Theme.blue : Theme.sub)
                         .padding(.horizontal, 12).padding(.vertical, 6)
