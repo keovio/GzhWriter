@@ -4,13 +4,21 @@ import WebKit
 
 @main
 struct GzhWriterApp: App {
-    @StateObject private var store = Store()
+    @StateObject private var store: Store
+    @StateObject private var pipeline: Pipeline
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+
+    init() {
+        let s = Store()
+        _store = StateObject(wrappedValue: s)
+        _pipeline = StateObject(wrappedValue: Pipeline(store: s))
+    }
 
     var body: some Scene {
         WindowGroup("公众号写稿助手") {
             ContentView()
                 .environmentObject(store)
+                .environmentObject(pipeline)
                 .frame(minWidth: 1100, minHeight: 700)
         }
         .commands {
