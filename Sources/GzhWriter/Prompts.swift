@@ -35,6 +35,14 @@ enum Prompts {
         """)]
     }
 
+    static func kindBlock(_ a: Article) -> String {
+        let k = ArticleKind.of(a.kind)
+        if k != .auto { return "文章类型：\(k.name)。\(k.outlineRule)" }
+        let list = ArticleKind.allCases.filter { $0 != .auto }
+            .map { "· \($0.rawValue)（\($0.name)）：\($0.outlineRule)" }.joined(separator: "\n")
+        return "先按选题和作者观点，从下面的文章类型里挑最合适的一种，按它的结构出大纲（作者没给真实经历时不要选 review）：\n\(list)"
+    }
+
     static func styleBlock(_ s: StylePreset?) -> String {
         guard let s, !s.sample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
         return "\n【作者范文，模仿它的口吻、句子长短和用词习惯，不要照抄内容】\n\(s.sample.prefix(3000))\n"
@@ -59,9 +67,10 @@ enum Prompts {
         \(a.material.isEmpty ? "" : "参考素材（只作参考，不要改写搬运）：\n\(a.material.prefix(5000))")
         \(profile(style))
 
-        围绕作者的观点出一份公众号文章大纲：4 到 6 节，每节一行，格式「小标题：这一节要讲的要点」。
+        \(kindBlock(a))
+        围绕作者的观点出一份公众号文章大纲，每部分一行，格式「小标题：这部分要讲的要点」。
         再给一个不标题党的文章标题。
-        只输出 JSON：{"title":"文章标题","outline":["小标题：要点", "..."]}
+        只输出 JSON：{"title":"文章标题","kind":"\(ArticleKind.of(a.kind) == .auto ? "所选类型英文代号" : a.kind)","outline":["小标题：要点", "..."]}
         """)]
     }
 
@@ -77,10 +86,11 @@ enum Prompts {
         \(all)
 
         \(done.isEmpty ? "" : "前面已经写好的部分（保持衔接，不要重复）：\n\(done)\n")
-        现在只写第 \(index + 1) 节：\(a.outline[index])
+        现在只写第 \(index + 1) 部分：\(a.outline[index])
+        \(ArticleKind.of(a.kind).writeRule)
 
         要求：\(max(200, words - 80)) 到 \(words + 120) 字；段落之间空一行；每段不超过 4 行；可以用 **加粗** 标出一两句关键句，可以用「> 」开头写一句引用。
-        不要写小标题，只输出这一节的正文。
+        不要写小标题，只输出这部分的正文。
         """)]
     }
 
@@ -101,12 +111,12 @@ enum Prompts {
         let sec = a.sections[index]
         return [.system(base + styleBlock(style)), .user("""
         文章标题：\(a.title)
-        这一节的小标题：\(sec.heading)
-        这一节原文：
+        这部分的小标题：\(sec.heading)
+        这部分原文：
         \(sec.body)
 
         修改要求：\(instruction)
-        格式同原文（段落之间空一行，可用 **加粗** 和「> 」引用）。只输出改好的这一节正文，不要小标题。
+        格式同原文（段落之间空一行，可用 **加粗** 和「> 」引用）。只输出改好的这部分正文，不要小标题。
         """)]
     }
 
@@ -118,7 +128,7 @@ enum Prompts {
 
         按五个维度打分（0-100）：标题、可读性、实用性、合规、人味（是否像真人在表达观点，而不是 AI 套话）。
         合规要看：夸大承诺、绝对化用语、医疗/金融等敏感建议、未核实的数据、诱导关注分享。
-        给出最多 8 条具体修改建议，每条注明是第几节（全文性问题 section 填 null），说清问题和改法。
+        给出最多 8 条具体修改建议，每条注明是第几部分（全文性问题 section 填 null），说清问题和改法。
         列出文中需要作者核实的事实、数字、引用、政策。
         再给 3 个备选标题。
         只输出 JSON：
@@ -131,4 +141,4 @@ enum Prompts {
 
 struct IdeasReply: Decodable { let ideas: [IdeaItem]; struct IdeaItem: Decodable { let title: String; let angle: String? } }
 struct TopicReply: Decodable { let topic: String; let angle: String?; let viewpoint: String? }
-struct OutlineReply: Decodable { let title: String?; let outline: [String] }
+struct OutlineReply: Decodable { let title: String?; let kind: String?; let outline: [String] }
