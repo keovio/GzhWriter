@@ -64,7 +64,7 @@ struct IdeasView: View {
                             .disabled(store.data.connections.isEmpty)
                         Button("手动写") { start(idea) }.buttonStyle(GhostButton())
                         Button { remove(idea) } label: { Image(systemName: "trash") }
-                            .buttonStyle(LinkButton(color: Theme.faint))
+                            .buttonStyle(LinkButton(color: Theme.sub))
                     }
                     .padding(.vertical, 10)
                 }
