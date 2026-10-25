@@ -149,11 +149,12 @@ final class Pipeline: ObservableObject {
             log(id, "选题：\(t.topic)")
 
             // 2 大纲
-            log(id, "写大纲")
+            log(id, "定文章类型、写大纲")
             guard let a1 = store.article(id) else { return id }
             let o = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(a1, style: style))
             store.update(id) {
                 if let tt = o.title, !tt.isEmpty { $0.title = tt }
+                if $0.kind == "auto", let k = o.kind, let kk = ArticleKind(rawValue: k), kk != .auto { $0.kind = kk.rawValue }
                 $0.outline = o.outline
                 $0.sections = o.outline.map { ArticleSection(heading: ArticleEditor.headingOf($0), body: "") }
                 $0.stage = .draft
@@ -163,7 +164,7 @@ final class Pipeline: ObservableObject {
             let n = max(1, o.outline.count)
             let per = max(250, settings.targetWords / n)
             for i in 0..<n {
-                log(id, "写第 \(i + 1)/\(n) 节")
+                log(id, "写第 \(i + 1)/\(n) 部分")
                 guard let a = store.article(id), i < a.sections.count else { break }
                 let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per))
                 store.update(id) { if i < $0.sections.count { $0.sections[i].body = Humanize.clean(text) } }
@@ -185,7 +186,7 @@ final class Pipeline: ObservableObject {
                 let grouped = Dictionary(grouping: fixes, by: { $0.section! - 1 })
                 for (idx, list) in grouped.sorted(by: { $0.key < $1.key }) {
                     guard let cur = store.article(id), idx < cur.sections.count else { continue }
-                    log(id, "返修第 \(idx + 1) 节")
+                    log(id, "返修第 \(idx + 1) 部分")
                     let ins = list.map { "问题：\($0.issue)；改法：\($0.fix)" }.joined(separator: "\n")
                     let text = try await store.run(.draft, Prompts.revise(cur, index: idx, instruction: ins, style: style))
                     store.update(id) { if idx < $0.sections.count { $0.sections[idx].body = Humanize.clean(text) } }
