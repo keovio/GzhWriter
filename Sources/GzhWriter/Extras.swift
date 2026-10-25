@@ -85,12 +85,21 @@ enum Compliance {
 
 enum Dedupe {
     static func norm(_ s: String) -> [Character] {
-        s.lowercased().filter { $0.isLetter || $0.isNumber }.map { $0 }
+        var out: [Character] = []
+        for ch in s.lowercased() where ch.isLetter || ch.isNumber { out.append(ch) }
+        return out
     }
     static func bigrams(_ s: String) -> Set<String> {
-        let c = norm(s)
-        guard c.count > 1 else { return Set(c.map { String($0) }) }
-        return Set((0..<(c.count - 1)).map { String(c[$0]) + String(c[$0 + 1]) })
+        let c: [Character] = norm(s)
+        var out = Set<String>()
+        if c.count == 1 { out.insert(String(c[0])) }
+        guard c.count > 1 else { return out }
+        for i in 0..<(c.count - 1) {
+            var pair = String(c[i])
+            pair.append(c[i + 1])
+            out.insert(pair)
+        }
+        return out
     }
     /// 0~1，越大越像
     static func similarity(_ a: String, _ b: String) -> Double {
