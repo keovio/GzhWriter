@@ -40,7 +40,7 @@ enum Layout {
             .filter { !$0.isEmpty }
     }
 
-    static func html(_ a: Article, signature: String = "") -> String {
+    static func html(_ a: Article, signature: String = "", img: ((String) -> String?)? = nil) -> String {
         let ac = a.accent
         let fs = a.fontSize
         let p = "margin:0 0 1.2em;font-size:\(fs)px;line-height:1.9;letter-spacing:0.5px;color:#3a3a3a;text-align:justify;"
@@ -63,6 +63,9 @@ enum Layout {
         var out = "<section style=\"padding:0 4px;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;\">"
         for (i, sec) in a.sections.enumerated() {
             if !sec.heading.isEmpty { out += heading(i, sec.heading) }
+            if !sec.image.isEmpty, let src = img?(sec.image) {
+                out += "<p style=\"margin:0 0 1.2em;text-align:center;\"><img src=\"\(src)\" style=\"width:100%;display:block;border-radius:6px;\"></p>"
+            }
             var block = ""
             for line in paragraphs(sec.body) {
                 if line.hasPrefix(">") {
@@ -92,17 +95,20 @@ enum Layout {
     static func previewPage(_ a: Article, signature: String = "") -> String {
         let title = a.title.isEmpty ? "" :
             "<h1 style=\"font-size:22px;line-height:1.4;margin:0 0 14px;color:#111;\">\(esc(a.title))</h1>"
+        let cover = ImageStore.dataURI(a.id, a.cover).map {
+            "<img src=\"\($0)\" style=\"width:100%;display:block;border-radius:8px;margin:0 0 16px;\">"
+        } ?? ""
         return """
         <!doctype html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
         <style>body{margin:0;background:#EDEFF3;} .phone{max-width:375px;margin:16px auto;background:#fff;padding:22px 16px 40px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}</style>
-        </head><body><div class="phone">\(title)\(html(a, signature: signature))</div></body></html>
+        </head><body><div class="phone">\(cover)\(title)\(html(a, signature: signature, img: { ImageStore.dataURI(a.id, $0) }))</div></body></html>
         """
     }
 
     /// 复制为富文本，直接粘到公众号编辑器
     static func copyRichText(_ a: Article, signature: String = "") {
-        let body = html(a, signature: signature)
+        let body = html(a, signature: signature, img: { ImageStore.dataURI(a.id, $0) })
         let pb = NSPasteboard.general
         pb.clearContents()
         let full = "<html><head><meta charset=\"utf-8\"></head><body>\(body)</body></html>"
