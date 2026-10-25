@@ -3,6 +3,7 @@ import SwiftUI
 struct ArticleEditor: View {
     @EnvironmentObject var store: Store
     let articleId: UUID
+    var close: () -> Void = {}
     @StateObject private var busy = Busy()
 
     @State private var urlInput = ""
@@ -29,80 +30,125 @@ struct ArticleEditor: View {
     }
 
     var body: some View {
-        HSplitView {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    TextField("文章标题", text: field(\.title))
-                        .textFieldStyle(.plain)
-                        .font(.title2.bold())
-                    Spacer()
-                    Text("\(a.wordCount) 字").foregroundStyle(.secondary)
-                }
-                Picker("", selection: field(\.stage)) {
-                    ForEach(Stage.allCases) { Text($0.title).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                BusyBar(busy: busy)
-                if let step = pipeline.running[articleId] {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("一键成稿进行中：\(step)").foregroundStyle(.secondary)
-                    }
-                }
-                if !a.log.isEmpty {
-                    DisclosureGroup("运行记录（\(a.log.count)）") {
-                        ScrollView {
-                            Text(a.log.joined(separator: "\n"))
-                                .font(.system(size: 11, design: .monospaced))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxHeight: 120)
-                    }
-                    .font(.callout)
-                }
-                let hits = Humanize.hits(a.plainText)
-                if !hits.isEmpty {
-                    Label("AI 味提醒：\(hits.prefix(4).joined(separator: "、"))", systemImage: "wand.and.stars")
-                        .font(.callout).foregroundStyle(.orange).lineLimit(1)
-                }
+        VStack(spacing: 0) {
+            topBar
+            Rectangle().fill(Theme.rule).frame(height: 1)
+            HStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        switch a.stage {
-                        case .topic: topicStage
-                        case .outline: outlineStage
-                        case .draft: draftStage
-                        case .review: reviewStage
-                        case .layout: layoutStage
+                        BusyBar(busy: busy)
+                        if let step = pipeline.running[articleId] {
+                            HStack(spacing: 10) {
+                                ProgressView().controlSize(.small)
+                                Text("正在自动生产：\(step)").font(.system(size: 13)).foregroundStyle(Theme.blue)
+                                Spacer()
+                            }
+                            .padding(12)
+                            .background(Theme.blueBg, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        let hits = Humanize.hits(a.plainText)
+                        if !hits.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "wand.and.stars").foregroundStyle(Theme.orange)
+                                Text("AI 味提醒：\(hits.prefix(4).joined(separator: "、"))").font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(1)
+                                Spacer()
+                            }
+                            .padding(10)
+                            .background(Theme.orangeBg, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        VStack(alignment: .leading, spacing: 14) {
+                            switch a.stage {
+                            case .topic: topicStage
+                            case .outline: outlineStage
+                            case .draft: draftStage
+                            case .review: reviewStage
+                            case .layout: layoutStage
+                            }
+                        }
+                        .card()
+                        if !a.log.isEmpty {
+                            DisclosureGroup("运行记录（\(a.log.count) 条）") {
+                                Text(a.log.joined(separator: "\n"))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(Theme.sub)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.top, 6)
+                            }
+                            .font(.system(size: 12))
+                            .card(padding: 14)
                         }
                     }
-                    .padding(.bottom, 40)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+                    .frame(maxWidth: 820)
+                    .frame(maxWidth: .infinity)
                 }
-            }
-            .padding(18)
-            .frame(minWidth: 560)
+                .background(Theme.bg)
 
-            VStack(spacing: 8) {
-                WebPreview(html: Layout.previewPage(a, signature: signature))
-                HStack {
-                    Button(copied ? "已复制 ✓" : "复制富文本") { copyRich() }
-                        .keyboardShortcut("c", modifiers: [.command, .shift])
-                    Text("粘到公众号编辑器").font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(.bottom, 10)
+                Rectangle().fill(Theme.rule).frame(width: 1)
+                previewPanel.frame(width: 430)
             }
-            .frame(minWidth: 360, idealWidth: 420)
-            .background(Color(nsColor: .windowBackgroundColor))
         }
+        .background(Theme.bg)
+    }
+
+    var topBar: some View {
+        HStack(spacing: 16) {
+            Button(action: close) {
+                HStack(spacing: 4) { Image(systemName: "chevron.left"); Text("返回") }
+            }
+            .buttonStyle(LinkButton(color: Theme.sub))
+            TextField("文章标题", text: field(\.title))
+                .textFieldStyle(.plain)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(Theme.ink)
+                .frame(minWidth: 160)
+            Spacer()
+            StepBar(current: a.stage, done: { $0.rawValue < a.stage.rawValue || (a.stage == .layout && $0 == .layout) }) { s in
+                edit { $0.stage = s }
+            }
+            .fixedSize()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 34)      // 红绿灯下方
+        .padding(.bottom, 12)
+        .background(Theme.sheet)
+    }
+
+    var previewPanel: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("手机预览").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                Spacer()
+                Text("\(a.wordCount) 字").font(.system(size: 12)).foregroundStyle(Theme.faint)
+                if let r = a.review { ScoreBadge(score: r.total) }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            WebPreview(html: Layout.previewPage(a, signature: signature))
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(Theme.rule, lineWidth: 6))
+                .padding(.horizontal, 16)
+            HStack(spacing: 10) {
+                Button { copyRich() } label: {
+                    HStack { Image(systemName: copied ? "checkmark" : "doc.on.doc"); Text(copied ? "已复制" : "复制富文本") }
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButton(large: true))
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                Button("纯文本") { Layout.copyMarkdown(a) }.buttonStyle(GhostButton())
+            }
+            .padding(16)
+            Text("复制后粘到公众号后台的正文区，过一眼再发").font(.system(size: 11)).foregroundStyle(Theme.faint)
+                .padding(.bottom, 14)
+        }
+        .background(Theme.sheet)
     }
 
     // MARK: ① 选题
 
     @ViewBuilder var topicStage: some View {
         label("选题")
-        TextField("这篇写什么", text: field(\.topic)).textFieldStyle(.roundedBorder)
+        TextField("这篇写什么", text: field(\.topic)).fieldBox()
 
         label("你的观点 / 想说的话（必填）")
         hint("写几句你自己的看法、经历或结论。AI 只帮你把它写清楚，这也是平台要求的「真人表达」。")
@@ -117,15 +163,15 @@ struct ArticleEditor: View {
 
         label("参考素材（可选，只作参考）")
         HStack {
-            TextField("贴一个网页链接读取正文", text: $urlInput).textFieldStyle(.roundedBorder)
-            Button("读取") { readURL() }.disabled(urlInput.isEmpty || busy.label != nil)
+            TextField("贴一个网页链接读取正文", text: $urlInput).fieldBox()
+            Button("读取") { readURL() }.buttonStyle(GhostButton()).disabled(urlInput.isEmpty || busy.label != nil)
         }
         editor(field(\.material), height: 140)
 
         HStack {
             Spacer()
             Button("下一步：生成大纲 →") { makeOutline() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButton())
                 .disabled(a.topic.trimmingCharacters(in: .whitespaces).isEmpty
                           || a.viewpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           || busy.label != nil)
@@ -142,7 +188,7 @@ struct ArticleEditor: View {
                 TextField("小标题：要点", text: Binding(
                     get: { i < a.outline.count ? a.outline[i] : "" },
                     set: { v in edit { if i < $0.outline.count { $0.outline[i] = v } } }))
-                    .textFieldStyle(.roundedBorder)
+                    .fieldBox()
                 Button { edit { if i > 0 { $0.outline.swapAt(i, i - 1) } } } label: { Image(systemName: "arrow.up") }
                     .buttonStyle(.borderless).disabled(i == 0)
                 Button { edit { if i + 1 < $0.outline.count { $0.outline.swapAt(i, i + 1) } } } label: { Image(systemName: "arrow.down") }
@@ -152,14 +198,14 @@ struct ArticleEditor: View {
             }
         }
         HStack {
-            TextField("加一节", text: $newOutline).textFieldStyle(.roundedBorder).onSubmit(addOutline)
-            Button("添加", action: addOutline).disabled(newOutline.isEmpty)
+            TextField("加一节", text: $newOutline).fieldBox().onSubmit(addOutline)
+            Button("添加", action: addOutline).buttonStyle(GhostButton()).disabled(newOutline.isEmpty)
         }
         HStack {
-            Button("重新生成大纲") { makeOutline() }.disabled(busy.label != nil)
+            Button("重新生成大纲") { makeOutline() }.buttonStyle(GhostButton()).disabled(busy.label != nil)
             Spacer()
             Button("确认大纲，开始写正文 →") { confirmOutline() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButton())
                 .disabled(a.outline.isEmpty)
         }
     }
@@ -170,17 +216,17 @@ struct ArticleEditor: View {
         HStack {
             hint("可以逐节让 AI 起草，也可以自己写。写完一定通读一遍，加进你自己的经历和例子。")
             Spacer()
-            Button("起草所有空白节") { draftAllEmpty() }
+            Button("起草所有空白节") { draftAllEmpty() }.buttonStyle(GhostButton())
                 .disabled(busy.label != nil || !a.sections.contains { $0.body.isEmpty })
         }
         if a.sections.isEmpty {
             Text("先在「大纲」里确认大纲。").foregroundStyle(.secondary)
         }
         ForEach(Array(a.sections.enumerated()), id: \.element.id) { i, sec in
-            GroupBox {
+            Group {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(String(format: "%02d", i + 1)).font(.headline).foregroundStyle(.secondary)
+                        Text(String(format: "%02d", i + 1)).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(Theme.blue)
                         TextField("小标题", text: sectionField(sec.id, \.heading))
                             .textFieldStyle(.plain).font(.headline)
                         Spacer()
@@ -189,7 +235,7 @@ struct ArticleEditor: View {
                     editor(sectionField(sec.id, \.body), height: 180)
                     HStack {
                         if sec.body.isEmpty {
-                            Button("AI 起草这一节") { draft(i) }.disabled(busy.label != nil)
+                            Button("AI 起草这一节") { draft(i) }.buttonStyle(GhostButton()).disabled(busy.label != nil)
                         } else {
                             Menu("AI 改写") {
                                 ForEach(Prompts.Op.allCases) { op in
@@ -200,7 +246,7 @@ struct ArticleEditor: View {
                             .disabled(busy.label != nil)
                             TextField("或者说说怎么改，回车", text: Binding(
                                 get: { custom[sec.id] ?? "" }, set: { custom[sec.id] = $0 }))
-                                .textFieldStyle(.roundedBorder)
+                                .fieldBox()
                                 .onSubmit {
                                     let t = (custom[sec.id] ?? "").trimmingCharacters(in: .whitespaces)
                                     if !t.isEmpty { revise(sec.id, t, label: "按要求修改"); custom[sec.id] = "" }
@@ -213,16 +259,19 @@ struct ArticleEditor: View {
                                 }
                                 undo[sec.id] = nil
                             }
+                            .buttonStyle(LinkButton(color: Theme.orange))
                         }
                     }
                 }
-                .padding(4)
+                .padding(14)
+                .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Theme.rule))
             }
         }
         if !a.sections.isEmpty {
             HStack {
                 Spacer()
-                Button("去审稿 →") { edit { $0.stage = .review } }.buttonStyle(.borderedProminent)
+                Button("去审稿 →") { edit { $0.stage = .review } }.buttonStyle(PrimaryButton())
             }
         }
     }
@@ -234,15 +283,15 @@ struct ArticleEditor: View {
             hint("审稿只给建议，点「采纳」才会改。改完可以再审一次。")
             Spacer()
             Button(a.review == nil ? "开始审稿" : "重新审稿") { review() }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButton())
                 .disabled(a.sections.allSatisfy { $0.body.isEmpty } || busy.label != nil)
         }
         if let r = a.review {
-            GroupBox {
+            Group {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline) {
                         Text("\(r.total)").font(.system(size: 40, weight: .bold))
-                            .foregroundStyle(r.total >= 80 ? Color.green : Color.orange)
+                            .foregroundStyle(Theme.scoreColor(r.total))
                         Text("总分").foregroundStyle(.secondary)
                         Spacer()
                         ForEach(["标题", "可读性", "实用性", "合规", "人味"], id: \.self) { k in
@@ -253,9 +302,10 @@ struct ArticleEditor: View {
                             .frame(width: 52)
                         }
                     }
-                    if !r.summary.isEmpty { Text(r.summary) }
+                    if !r.summary.isEmpty { Text(r.summary).font(.system(size: 13)).foregroundStyle(Theme.ink) }
                 }
-                .padding(4)
+                .padding(16)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 12))
             }
 
             label("修改建议")
@@ -270,10 +320,10 @@ struct ArticleEditor: View {
                     if s.applied {
                         Text("已处理").foregroundStyle(.green)
                     } else if let n = s.section, n >= 1, n <= a.sections.count {
-                        Button("采纳") { apply(s) }.disabled(busy.label != nil)
-                        Button("忽略") { markApplied(s.id) }
+                        Button("采纳") { apply(s) }.buttonStyle(PrimaryButton()).disabled(busy.label != nil)
+                        Button("忽略") { markApplied(s.id) }.buttonStyle(GhostButton())
                     } else {
-                        Button("我改好了") { markApplied(s.id) }
+                        Button("我改好了") { markApplied(s.id) }.buttonStyle(GhostButton())
                     }
                 }
                 .padding(8)
@@ -293,14 +343,14 @@ struct ArticleEditor: View {
                     HStack {
                         Text(t)
                         Spacer()
-                        Button("用这个") { edit { $0.title = t } }
+                        Button("用这个") { edit { $0.title = t } }.buttonStyle(GhostButton())
                     }
                 }
             }
 
             HStack {
                 Spacer()
-                Button("去排版 →") { edit { $0.stage = .layout } }.buttonStyle(.borderedProminent)
+                Button("去排版 →") { edit { $0.stage = .layout } }.buttonStyle(PrimaryButton())
             }
         }
     }
@@ -334,32 +384,39 @@ struct ArticleEditor: View {
                 .foregroundStyle(.orange)
         }
 
-        GroupBox {
+        Group {
             VStack(alignment: .leading, spacing: 6) {
                 Text("发布步骤").font(.headline)
                 Text("1. 点「复制富文本」")
                 Text("2. 在公众号后台新建图文，粘贴到正文区，标题单独填")
                 Text("3. 自己通读一遍，设封面，手动发表或群发")
             }
-            .padding(4)
+            .font(.system(size: 12))
+            .foregroundStyle(Theme.sub)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
         }
         HStack {
-            Button(copied ? "已复制 ✓" : "复制富文本") { copyRich() }.buttonStyle(.borderedProminent)
-            Button("复制纯文本") { Layout.copyMarkdown(a) }
+            Button(copied ? "已复制 ✓" : "复制富文本") { copyRich() }.buttonStyle(PrimaryButton())
+            Button("复制纯文本") { Layout.copyMarkdown(a) }.buttonStyle(GhostButton())
         }
     }
 
     // MARK: 小部件
 
-    func label(_ s: String) -> some View { Text(s).font(.headline).padding(.top, 4) }
-    func hint(_ s: String) -> some View { Text(s).font(.callout).foregroundStyle(.secondary) }
+    func label(_ s: String) -> some View {
+        Text(s).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink).padding(.top, 4)
+    }
+    func hint(_ s: String) -> some View { Text(s).font(.system(size: 12)).foregroundStyle(Theme.sub) }
     func editor(_ b: Binding<String>, height: CGFloat) -> some View {
         TextEditor(text: b)
             .font(.system(size: 14))
-            .lineSpacing(4)
+            .lineSpacing(5)
+            .scrollContentBackground(.hidden)
             .frame(minHeight: height)
-            .padding(4)
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.25)))
+            .padding(8)
+            .background(Theme.bg, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     // MARK: 动作
