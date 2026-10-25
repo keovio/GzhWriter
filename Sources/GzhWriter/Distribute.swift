@@ -69,7 +69,7 @@ struct DistributeCard: View {
                 HStack(spacing: 6) {
                     ForEach([("toutiao", "头条号"), ("baijiahao", "百家号")], id: \.0) { key, name in
                         Button(name) { platform = key }
-                            .buttonStyle(.plain)
+                            .buttonStyle(RowButton())
                             .font(.system(size: 12, weight: platform == key ? .semibold : .regular))
                             .foregroundStyle(platform == key ? Theme.blue : Theme.sub)
                             .padding(.horizontal, 12).padding(.vertical, 5)
