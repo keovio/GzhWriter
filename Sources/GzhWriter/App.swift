@@ -19,8 +19,9 @@ struct GzhWriterApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(pipeline)
-                .frame(minWidth: 1100, minHeight: 700)
+                .frame(minWidth: 1180, minHeight: 740)
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("新建稿件") {
