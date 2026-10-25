@@ -99,6 +99,7 @@ struct Article: Identifiable, Codable, Hashable {
     var accent = "#3F68A8"
     var fontSize = 16
     var aiNotice = true
+    var kind = "auto"           // 文章类型，见 ArticleKind
     var auto = false            // 一键成稿生成的
     var log: [String] = []      // 自动流程的运行记录
     var wechatDraft = ""        // 推到公众号草稿箱后的 media_id
@@ -110,7 +111,7 @@ struct Article: Identifiable, Codable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, wechatDraft, cover, digest, variants, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -131,6 +132,7 @@ struct Article: Identifiable, Codable, Hashable {
         accent = (try? c.decode(String.self, forKey: .accent)) ?? d.accent
         fontSize = (try? c.decode(Int.self, forKey: .fontSize)) ?? d.fontSize
         aiNotice = (try? c.decode(Bool.self, forKey: .aiNotice)) ?? d.aiNotice
+        kind = (try? c.decode(String.self, forKey: .kind)) ?? "auto"
         auto = (try? c.decode(Bool.self, forKey: .auto)) ?? false
         log = (try? c.decode([String].self, forKey: .log)) ?? []
         wechatDraft = (try? c.decode(String.self, forKey: .wechatDraft)) ?? ""
@@ -308,4 +310,62 @@ struct ProviderPreset: Identifiable {
         .init(id: "doubao", name: "豆包（火山方舟）", baseURL: "https://ark.cn-beijing.volces.com/api/v3", model: ""),
         .init(id: "custom", name: "自定义 / 中转站", baseURL: "https://", model: ""),
     ]
+}
+
+
+/// 文章类型：决定大纲结构和写法
+enum ArticleKind: String, CaseIterable, Identifiable {
+    case auto, guide, story, opinion, news, review
+    var id: String { rawValue }
+
+    var name: String {
+        switch self {
+        case .auto: return "自动挑"
+        case .guide: return "干货清单"
+        case .story: return "故事叙事"
+        case .opinion: return "观点评论"
+        case .news: return "热点解读"
+        case .review: return "经验复盘"
+        }
+    }
+
+    var hint: String {
+        switch self {
+        case .auto: return "按选题自动选最合适的类型"
+        case .guide: return "小标题分条，每条一个方法，适合「怎么做」"
+        case .story: return "不分小标题，按情节写一个人或一件事，结尾点一句感悟"
+        case .opinion: return "开头亮观点，中间两三个理由或反驳，结尾回到观点"
+        case .news: return "发生了什么、为什么重要、对读者的影响、怎么应对"
+        case .review: return "自己做过的一件事：背景、踩的坑、数据、结论"
+        }
+    }
+
+    /// 大纲怎么出
+    var outlineRule: String {
+        switch self {
+        case .auto: return ""
+        case .guide: return "干货清单文：4 到 6 部分，每部分一个具体方法或要点，小标题直接说方法。"
+        case .story: return "故事叙事文：4 到 5 个情节段（起因、经过、转折、结果、感悟），小标题只是给作者看的段落提示，不会出现在文中。"
+        case .opinion: return "观点评论文：3 到 5 部分，第一部分亮明观点，中间部分是理由或对反方的回应，最后一部分回到观点并给读者建议。"
+        case .news: return "热点解读文：4 部分左右，依次是发生了什么、为什么重要、对读者有什么影响、读者该怎么做。"
+        case .review: return "经验复盘文：4 到 5 部分，依次是背景和目标、做法、踩过的坑、结果和数据、可以复用的结论。经历和数据只用作者提供的，缺的写【待核实】。"
+        }
+    }
+
+    /// 正文怎么写
+    var writeRule: String {
+        switch self {
+        case .story: return "这是故事叙事文，用场景、细节和对话推进，和前文自然衔接，不要写成分点说明。"
+        case .opinion: return "这是观点评论文，立场鲜明，论证具体，可以正面回应不同意见。"
+        case .news: return "这是热点解读文，事实部分克制准确，不确定的写【待核实】，重点讲对读者的影响。"
+        case .review: return "这是经验复盘文，用第一人称，具体到做了什么、结果如何。"
+        case .guide: return "这是干货清单文，讲清楚方法和步骤，最好带一个具体例子。"
+        case .auto: return ""
+        }
+    }
+
+    /// 是否在成文里显示小标题
+    var showsHeadings: Bool { self != .story }
+
+    static func of(_ s: String) -> ArticleKind { ArticleKind(rawValue: s) ?? .auto }
 }
