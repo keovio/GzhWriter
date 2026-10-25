@@ -20,6 +20,26 @@ struct ArticleSection: Identifiable, Codable, Hashable {
     var id = UUID()
     var heading: String
     var body: String
+    var image = ""              // 配图的本地文件名（在稿件图片目录里）
+
+    enum CodingKeys: String, CodingKey { case id, heading, body, image }
+    init(id: UUID = UUID(), heading: String, body: String, image: String = "") {
+        self.id = id; self.heading = heading; self.body = body; self.image = image
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        heading = (try? c.decode(String.self, forKey: .heading)) ?? ""
+        body = (try? c.decode(String.self, forKey: .body)) ?? ""
+        image = (try? c.decode(String.self, forKey: .image)) ?? ""
+    }
+}
+
+/// 其他平台的版本（头条号、百家号）
+struct PlatformVariant: Codable, Hashable {
+    var title = ""
+    var intro = ""              // 改写过的开头一段
+    var tags: [String] = []
 }
 
 /// 审稿给出的一条建议。只有作者点「采纳」才会改稿。
@@ -81,12 +101,16 @@ struct Article: Identifiable, Codable, Hashable {
     var aiNotice = true
     var auto = false            // 一键成稿生成的
     var log: [String] = []      // 自动流程的运行记录
+    var wechatDraft = ""        // 推到公众号草稿箱后的 media_id
+    var cover = ""              // 封面图文件名
+    var digest = ""             // 摘要
+    var variants: [String: PlatformVariant] = [:]   // "toutiao" / "baijiahao"
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, created, updated
+             template, accent, fontSize, aiNotice, auto, log, wechatDraft, cover, digest, variants, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -109,6 +133,10 @@ struct Article: Identifiable, Codable, Hashable {
         aiNotice = (try? c.decode(Bool.self, forKey: .aiNotice)) ?? d.aiNotice
         auto = (try? c.decode(Bool.self, forKey: .auto)) ?? false
         log = (try? c.decode([String].self, forKey: .log)) ?? []
+        wechatDraft = (try? c.decode(String.self, forKey: .wechatDraft)) ?? ""
+        cover = (try? c.decode(String.self, forKey: .cover)) ?? ""
+        digest = (try? c.decode(String.self, forKey: .digest)) ?? ""
+        variants = (try? c.decode([String: PlatformVariant].self, forKey: .variants)) ?? [:]
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
@@ -150,8 +178,9 @@ struct StylePreset: Identifiable, Codable, Hashable {
     var sample: String = ""
     var avoid: String = ""
     var signature: String = ""  // 文末一句话 / 署名
+    var author: String = ""     // 作者名（草稿箱里显示）
 
-    enum CodingKeys: String, CodingKey { case id, name, track, audience, sample, avoid, signature }
+    enum CodingKeys: String, CodingKey { case id, name, track, audience, sample, avoid, signature, author }
     init(name: String, sample: String = "", avoid: String = "") {
         self.name = name; self.sample = sample; self.avoid = avoid
     }
@@ -164,6 +193,7 @@ struct StylePreset: Identifiable, Codable, Hashable {
         sample = (try? c.decode(String.self, forKey: .sample)) ?? ""
         avoid = (try? c.decode(String.self, forKey: .avoid)) ?? ""
         signature = (try? c.decode(String.self, forKey: .signature)) ?? ""
+        author = (try? c.decode(String.self, forKey: .author)) ?? ""
     }
 }
 
@@ -178,8 +208,12 @@ struct AutoSettings: Codable, Hashable {
     var dailyMinute = 0
     var dailyStyleId: UUID?
     var lastDaily: Date?
+    var images = true           // 自动配图
+    var imageEvery = 2          // 每几节配一张
+    var imageStyle = "扁平插画"
+    var variants = true         // 自动出头条号、百家号版本
 
-    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily }
+    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -193,6 +227,10 @@ struct AutoSettings: Codable, Hashable {
         dailyMinute = (try? c.decode(Int.self, forKey: .dailyMinute)) ?? d.dailyMinute
         dailyStyleId = try? c.decodeIfPresent(UUID.self, forKey: .dailyStyleId)
         lastDaily = try? c.decodeIfPresent(Date.self, forKey: .lastDaily)
+        images = (try? c.decode(Bool.self, forKey: .images)) ?? d.images
+        imageEvery = (try? c.decode(Int.self, forKey: .imageEvery)) ?? d.imageEvery
+        imageStyle = (try? c.decode(String.self, forKey: .imageStyle)) ?? d.imageStyle
+        variants = (try? c.decode(Bool.self, forKey: .variants)) ?? d.variants
     }
 }
 
@@ -224,8 +262,9 @@ struct AppData: Codable {
     /// 每个角色按顺序尝试的连接；前一个失败自动换下一个
     var roles: [String: [UUID]] = [:]
     var auto = AutoSettings()
+    var wechat = WechatSettings()
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -235,6 +274,23 @@ struct AppData: Codable {
         connections = (try? c.decode([ModelConnection].self, forKey: .connections)) ?? []
         roles = (try? c.decode([String: [UUID]].self, forKey: .roles)) ?? [:]
         auto = (try? c.decode(AutoSettings.self, forKey: .auto)) ?? AutoSettings()
+        wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
+    }
+}
+
+/// 公众号开发者接口：只用来存草稿箱，不发表
+struct WechatSettings: Codable, Hashable {
+    var appId = ""
+    var autoPush = false        // 一键成稿完成后自动推到草稿箱
+    var openComment = true
+
+    enum CodingKeys: String, CodingKey { case appId, autoPush, openComment }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        appId = (try? c.decode(String.self, forKey: .appId)) ?? ""
+        autoPush = (try? c.decode(Bool.self, forKey: .autoPush)) ?? false
+        openComment = (try? c.decode(Bool.self, forKey: .openComment)) ?? true
     }
 }
 
