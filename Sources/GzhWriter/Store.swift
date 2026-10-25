@@ -90,6 +90,7 @@ final class Store: ObservableObject {
 
     func deleteArticle(_ id: UUID) {
         data.articles.removeAll { $0.id == id }
+        ImageStore.remove(id)
         save()
     }
 
