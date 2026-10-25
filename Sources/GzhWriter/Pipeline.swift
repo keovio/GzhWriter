@@ -199,9 +199,29 @@ final class Pipeline: ObservableObject {
 
             // 5 排版
             store.update(id) { $0.stage = .layout }
+
+            // 6 配图、各平台版本（出错不影响稿件本身）
+            if settings.images {
+                do { try await Publisher.makeImages(store, id) { self.log(id, $0) } }
+                catch { log(id, "配图出错：\(error.localizedDescription)") }
+            }
+            if settings.variants {
+                log(id, "生成头条号、百家号版本")
+                do { try await Publisher.makeVariants(store, id) }
+                catch { log(id, "平台版本出错：\(error.localizedDescription)") }
+            }
+
+            // 7 推公众号草稿箱（只存草稿，不发表）
+            var pushed = false
+            if store.data.wechat.autoPush, !store.data.wechat.appId.isEmpty {
+                do { try await Publisher.pushDraft(store, id) { self.log(id, $0) }; pushed = true }
+                catch { log(id, "推草稿箱失败：\(error.localizedDescription)") }
+            }
+
             let score = store.article(id)?.review?.total ?? 0
             log(id, "完成，\(score) 分，等你过目")
-            notify("草稿写好了（\(score) 分）", store.article(id)?.displayTitle ?? "")
+            notify(pushed ? "已进公众号草稿箱（\(score) 分）" : "草稿写好了（\(score) 分）",
+                   (store.article(id)?.displayTitle ?? "") + (pushed ? "，在手机上看一眼再发表" : ""))
         } catch {
             log(id, "出错：\(error.localizedDescription)")
             lastError = error.localizedDescription
