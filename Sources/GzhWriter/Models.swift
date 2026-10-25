@@ -79,12 +79,14 @@ struct Article: Identifiable, Codable, Hashable {
     var accent = "#3F68A8"
     var fontSize = 16
     var aiNotice = true
+    var auto = false            // 一键成稿生成的
+    var log: [String] = []      // 自动流程的运行记录
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, created, updated
+             template, accent, fontSize, aiNotice, auto, log, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -105,6 +107,8 @@ struct Article: Identifiable, Codable, Hashable {
         accent = (try? c.decode(String.self, forKey: .accent)) ?? d.accent
         fontSize = (try? c.decode(Int.self, forKey: .fontSize)) ?? d.fontSize
         aiNotice = (try? c.decode(Bool.self, forKey: .aiNotice)) ?? d.aiNotice
+        auto = (try? c.decode(Bool.self, forKey: .auto)) ?? false
+        log = (try? c.decode([String].self, forKey: .log)) ?? []
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
@@ -141,8 +145,55 @@ struct TopicIdea: Identifiable, Codable, Hashable {
 struct StylePreset: Identifiable, Codable, Hashable {
     var id = UUID()
     var name: String
+    var track: String = ""      // 赛道
+    var audience: String = ""   // 读者是谁
     var sample: String = ""
     var avoid: String = ""
+    var signature: String = ""  // 文末一句话 / 署名
+
+    enum CodingKeys: String, CodingKey { case id, name, track, audience, sample, avoid, signature }
+    init(name: String, sample: String = "", avoid: String = "") {
+        self.name = name; self.sample = sample; self.avoid = avoid
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? c.decode(String.self, forKey: .name)) ?? "我的号"
+        track = (try? c.decode(String.self, forKey: .track)) ?? ""
+        audience = (try? c.decode(String.self, forKey: .audience)) ?? ""
+        sample = (try? c.decode(String.self, forKey: .sample)) ?? ""
+        avoid = (try? c.decode(String.self, forKey: .avoid)) ?? ""
+        signature = (try? c.decode(String.self, forKey: .signature)) ?? ""
+    }
+}
+
+/// 自动化设置
+struct AutoSettings: Codable, Hashable {
+    var passScore = 80          // 审稿及格线
+    var maxRounds = 2           // 不及格最多自动返修几轮
+    var useHot = true           // 自动选题参考热榜
+    var targetWords = 1500
+    var dailyEnabled = false    // 每天定时写一篇（只生成草稿，不发布）
+    var dailyHour = 8
+    var dailyMinute = 0
+    var dailyStyleId: UUID?
+    var lastDaily: Date?
+
+    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AutoSettings()
+        passScore = (try? c.decode(Int.self, forKey: .passScore)) ?? d.passScore
+        maxRounds = (try? c.decode(Int.self, forKey: .maxRounds)) ?? d.maxRounds
+        useHot = (try? c.decode(Bool.self, forKey: .useHot)) ?? d.useHot
+        targetWords = (try? c.decode(Int.self, forKey: .targetWords)) ?? d.targetWords
+        dailyEnabled = (try? c.decode(Bool.self, forKey: .dailyEnabled)) ?? d.dailyEnabled
+        dailyHour = (try? c.decode(Int.self, forKey: .dailyHour)) ?? d.dailyHour
+        dailyMinute = (try? c.decode(Int.self, forKey: .dailyMinute)) ?? d.dailyMinute
+        dailyStyleId = try? c.decodeIfPresent(UUID.self, forKey: .dailyStyleId)
+        lastDaily = try? c.decodeIfPresent(Date.self, forKey: .lastDaily)
+    }
 }
 
 /// 一个 OpenAI 兼容的模型连接。API Key 存在钥匙串里，不进数据文件。
@@ -172,8 +223,9 @@ struct AppData: Codable {
     var connections: [ModelConnection] = []
     /// 每个角色按顺序尝试的连接；前一个失败自动换下一个
     var roles: [String: [UUID]] = [:]
+    var auto = AutoSettings()
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -182,6 +234,7 @@ struct AppData: Codable {
         styles = (try? c.decode([StylePreset].self, forKey: .styles)) ?? []
         connections = (try? c.decode([ModelConnection].self, forKey: .connections)) ?? []
         roles = (try? c.decode([String: [UUID]].self, forKey: .roles)) ?? [:]
+        auto = (try? c.decode(AutoSettings.self, forKey: .auto)) ?? AutoSettings()
     }
 }
 
