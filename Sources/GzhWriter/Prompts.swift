@@ -9,7 +9,7 @@ enum Prompts {
     1. 作者的观点、经历和取舍优先，你负责把它们写清楚、写好读，不替作者编造经历。
     2. 不编造数据、案例、引用、政策条文；需要具体数字或出处时，写成【待核实：说明】占位，让作者自己补。
     3. 语言自然口语化，少用"首先/其次/综上所述/在当今社会"这类套话，不用 emoji 堆砌。
-    4. 去 AI 味：不用「不是……而是……」「值得一提的是」「总而言之」「让我们」「赋能」「抓手」这类句式和黑话；不用破折号；结尾不拔高、不喊口号；多用具体场景和短句。
+    4. 去 AI 味：不用「最」「第一」「唯一」「稳赚」「包过」等绝对化和承诺性用语，不写「点赞、在看、转发」之类的诱导语；不用「不是……而是……」「值得一提的是」「总而言之」「让我们」「赋能」「抓手」这类句式和黑话；不用破折号；结尾不拔高、不喊口号；多用具体场景和短句。
     5. 严格按要求的格式输出，不要多余解释。
     """
 
@@ -23,12 +23,14 @@ enum Prompts {
     }
 
     /// 自动选题：从方向 / 热榜 / 赛道里挑一个最值得写的，并替作者拟一个立场
-    static func pickTopic(direction: String, style: StylePreset?, hot: [String], existing: [String]) -> [ChatMessage] {
+    static func pickTopic(direction: String, style: StylePreset?, hot: [String], existing: [String], avoidSimilar: [String] = [], ref: Breakdown? = nil) -> [ChatMessage] {
         [.system(base), .user("""
         \(profile(style))
         \(direction.isEmpty ? "作者没有指定方向，请按赛道和读者自己挑。" : "作者想写的方向：\(direction)")
         \(hot.isEmpty ? "" : "今日热榜（可以借势，但只选和赛道相关、能写出干货的，不要硬蹭）：\n" + hot.prefix(40).joined(separator: "\n"))
-        \(existing.isEmpty ? "" : "已经写过的标题（不要重复）：" + existing.prefix(40).joined(separator: "；"))
+        \(existing.isEmpty ? "" : "已经写过的选题（不要重复，也不要换个说法写同一件事）：" + existing.prefix(80).joined(separator: "；"))
+        \(avoidSimilar.isEmpty ? "" : "你刚才挑的「" + avoidSimilar.joined(separator: "」「") + "」和写过的太像了，这次换一个不同的点。")
+        \(ref.map { "这篇要套用一篇爆文的写法，挑一个适合这种写法的选题。这种写法适合：" + $0.fitTopics.joined(separator: "、") } ?? "")
 
         挑 1 个最值得写的选题，给出切入角度，并写一段这篇文章要表达的核心观点（3 到 5 句，立场鲜明、具体，像作者本人会说的话）。
         只输出 JSON：{"topic":"选题","angle":"切入角度","viewpoint":"核心观点"}
@@ -60,7 +62,7 @@ enum Prompts {
         """)]
     }
 
-    static func outline(_ a: Article, style: StylePreset?) -> [ChatMessage] {
+    static func outline(_ a: Article, style: StylePreset?, ref: Breakdown? = nil) -> [ChatMessage] {
         [.system(base), .user("""
         选题：\(a.topic)
         作者的观点 / 想说的话：\(a.viewpoint)
@@ -68,13 +70,14 @@ enum Prompts {
         \(profile(style))
 
         \(kindBlock(a))
+        \(ref.map { $0.guide + "大纲结构尽量贴近上面的参考结构。" } ?? "")
         围绕作者的观点出一份公众号文章大纲，每部分一行，格式「小标题：这部分要讲的要点」。
         再给一个不标题党的文章标题。
         只输出 JSON：{"title":"文章标题","kind":"\(ArticleKind.of(a.kind) == .auto ? "所选类型英文代号" : a.kind)","outline":["小标题：要点", "..."]}
         """)]
     }
 
-    static func section(_ a: Article, index: Int, style: StylePreset?, words: Int = 400) -> [ChatMessage] {
+    static func section(_ a: Article, index: Int, style: StylePreset?, words: Int = 400, ref: Breakdown? = nil) -> [ChatMessage] {
         let all = a.outline.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         let done = a.sections.prefix(index).map { "· \($0.heading)：\($0.body.prefix(80))…" }.joined(separator: "\n")
         return [.system(base + styleBlock(style)), .user("""
@@ -88,6 +91,7 @@ enum Prompts {
         \(done.isEmpty ? "" : "前面已经写好的部分（保持衔接，不要重复）：\n\(done)\n")
         现在只写第 \(index + 1) 部分：\(a.outline[index])
         \(ArticleKind.of(a.kind).writeRule)
+        \(ref.map { $0.guide + (index == 0 ? "这是第一部分，用上面的开头手法。" : (index == a.outline.count - 1 ? "这是最后一部分，用上面的结尾手法。" : "")) } ?? "")
 
         要求：\(max(200, words - 80)) 到 \(words + 120) 字；段落之间空一行；每段不超过 4 行；可以用 **加粗** 标出一两句关键句，可以用「> 」开头写一句引用。
         不要写小标题，只输出这部分的正文。
