@@ -51,6 +51,10 @@ struct StylesView: View {
                         TextField("比如：明星八卦、股票推荐", text: b.avoid).fieldBox().frame(width: 360)
                     }
                     Divider()
+                    SettingRow(label: "作者名", hint: "推到草稿箱时填在作者栏") {
+                        TextField("比如：小 K", text: b.author).fieldBox().frame(width: 360)
+                    }
+                    Divider()
                     SettingRow(label: "文末一句话", hint: "排版时放在文章末尾") {
                         TextField("比如：我是小 K，陪你上岸。", text: b.signature).fieldBox().frame(width: 360)
                     }
