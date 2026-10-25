@@ -11,7 +11,9 @@ struct ArticleEditor: View {
     @State private var newOutline = ""
     @State private var copied = false
 
+    @EnvironmentObject var pipeline: Pipeline
     var a: Article { store.article(articleId) ?? Article() }
+    var signature: String { store.style(a.styleId)?.signature ?? "" }
     func edit(_ f: (inout Article) -> Void) { store.update(articleId, f) }
 
     func field<T>(_ kp: WritableKeyPath<Article, T>) -> Binding<T> {
@@ -42,6 +44,29 @@ struct ArticleEditor: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 BusyBar(busy: busy)
+                if let step = pipeline.running[articleId] {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("一键成稿进行中：\(step)").foregroundStyle(.secondary)
+                    }
+                }
+                if !a.log.isEmpty {
+                    DisclosureGroup("运行记录（\(a.log.count)）") {
+                        ScrollView {
+                            Text(a.log.joined(separator: "\n"))
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 120)
+                    }
+                    .font(.callout)
+                }
+                let hits = Humanize.hits(a.plainText)
+                if !hits.isEmpty {
+                    Label("AI 味提醒：\(hits.prefix(4).joined(separator: "、"))", systemImage: "wand.and.stars")
+                        .font(.callout).foregroundStyle(.orange).lineLimit(1)
+                }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         switch a.stage {
@@ -60,7 +85,7 @@ struct ArticleEditor: View {
             .frame(minWidth: 560)
 
             VStack(spacing: 8) {
-                WebPreview(html: Layout.previewPage(a))
+                WebPreview(html: Layout.previewPage(a, signature: signature))
                 HStack {
                     Button(copied ? "已复制 ✓" : "复制富文本") { copyRich() }
                         .keyboardShortcut("c", modifiers: [.command, .shift])
@@ -83,7 +108,7 @@ struct ArticleEditor: View {
         hint("写几句你自己的看法、经历或结论。AI 只帮你把它写清楚，这也是平台要求的「真人表达」。")
         editor(field(\.viewpoint), height: 110)
 
-        label("口吻")
+        label("账号")
         Picker("", selection: field(\.styleId)) {
             ForEach(store.data.styles) { Text($0.name).tag(Optional($0.id)) }
         }
@@ -340,7 +365,7 @@ struct ArticleEditor: View {
     // MARK: 动作
 
     func copyRich() {
-        Layout.copyRichText(a)
+        Layout.copyRichText(a, signature: signature)
         copied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copied = false }
     }
