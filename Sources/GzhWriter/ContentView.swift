@@ -123,24 +123,42 @@ struct Sidebar: View {
     }
 
     func item(_ title: String, _ icon: String, _ p: Pane, badge: String? = nil) -> some View {
-        let on = pane == p
-        return Button { pane = p } label: {
+        SideItem(title: title, icon: icon, on: pane == p, badge: badge) { pane = p }
+    }
+}
+
+struct SideItem: View {
+    let title: String
+    let icon: String
+    let on: Bool
+    var badge: String?
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon).font(.system(size: 13)).frame(width: 18)
                 Text(title).font(.system(size: 13, weight: on ? .semibold : .regular)).lineLimit(1)
                 Spacer()
                 if let b = badge {
                     Text(b).font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(on ? Theme.blue : Theme.sub)
+                        .foregroundStyle(on ? Theme.navy : Theme.sub)
                         .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(on ? Color.white : Color(hex: "#EEF0F3"), in: Capsule())
+                        .background(on ? Color.white : Color(hex: "#DFE4F2"), in: Capsule())
                 }
             }
-            .foregroundStyle(on ? Theme.blue : Theme.ink.opacity(0.85))
+            .foregroundStyle(on ? Color.white : Theme.ink.opacity(0.88))
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(on ? Theme.blueBg : Color.clear))
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(on ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(hover ? Color.white : Color.clear))
+                    .shadow(color: on ? Theme.navy.opacity(0.3) : .clear, radius: 6, y: 2)
+            }
             .contentShape(Rectangle())
+            .onHover { hover = $0 }
+            .animation(.easeOut(duration: 0.12), value: hover)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(RowButton())
     }
 }
