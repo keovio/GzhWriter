@@ -240,7 +240,7 @@ struct PublishSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 SectionTitle(text: "自动配图").padding(.bottom, 6)
                 SettingRow(label: "写完自动配图", hint: ImageGen.connection(store) == nil
-                           ? "画图要用智谱 CogView-4（约 0.06 元一张）。到「模型与分工」添加智谱并填 Key；没接时只生成文字封面。"
+                           ? "画图用智谱 GLM-Image（0.1 元一张，没开通会自动换 CogView-4）。到「模型与分工」添加智谱并填 Key；没接时只生成文字封面。"
                            : "已接智谱，封面加正文配图") {
                     Toggle("", isOn: au(\.images)).toggleStyle(.switch).labelsHidden()
                 }
