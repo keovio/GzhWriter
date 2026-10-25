@@ -106,12 +106,14 @@ struct Article: Identifiable, Codable, Hashable {
     var cover = ""              // 封面图文件名
     var digest = ""             // 摘要
     var variants: [String: PlatformVariant] = [:]   // "toutiao" / "baijiahao"
+    var titleOptions: [TitleOption] = []            // 标题多选
+    var refId: UUID?                                // 参考的爆文拆解
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -139,6 +141,8 @@ struct Article: Identifiable, Codable, Hashable {
         cover = (try? c.decode(String.self, forKey: .cover)) ?? ""
         digest = (try? c.decode(String.self, forKey: .digest)) ?? ""
         variants = (try? c.decode([String: PlatformVariant].self, forKey: .variants)) ?? [:]
+        titleOptions = (try? c.decode([TitleOption].self, forKey: .titleOptions)) ?? []
+        refId = try? c.decodeIfPresent(UUID.self, forKey: .refId)
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
@@ -214,8 +218,10 @@ struct AutoSettings: Codable, Hashable {
     var imageEvery = 2          // 每几节配一张
     var imageStyle = "扁平插画"
     var variants = true         // 自动出头条号、百家号版本
+    var autoTitle = true        // 自动出 5 个标题并换上最高分的
+    var autoCompliance = true   // 自动改掉敏感词
 
-    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants }
+    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -233,6 +239,8 @@ struct AutoSettings: Codable, Hashable {
         imageEvery = (try? c.decode(Int.self, forKey: .imageEvery)) ?? d.imageEvery
         imageStyle = (try? c.decode(String.self, forKey: .imageStyle)) ?? d.imageStyle
         variants = (try? c.decode(Bool.self, forKey: .variants)) ?? d.variants
+        autoTitle = (try? c.decode(Bool.self, forKey: .autoTitle)) ?? d.autoTitle
+        autoCompliance = (try? c.decode(Bool.self, forKey: .autoCompliance)) ?? d.autoCompliance
     }
 }
 
@@ -265,8 +273,9 @@ struct AppData: Codable {
     var roles: [String: [UUID]] = [:]
     var auto = AutoSettings()
     var wechat = WechatSettings()
+    var breakdowns: [Breakdown] = []
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -277,6 +286,7 @@ struct AppData: Codable {
         roles = (try? c.decode([String: [UUID]].self, forKey: .roles)) ?? [:]
         auto = (try? c.decode(AutoSettings.self, forKey: .auto)) ?? AutoSettings()
         wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
+        breakdowns = (try? c.decode([Breakdown].self, forKey: .breakdowns)) ?? []
     }
 }
 
@@ -368,4 +378,67 @@ enum ArticleKind: String, CaseIterable, Identifiable {
     var showsHeadings: Bool { self != .story }
 
     static func of(_ s: String) -> ArticleKind { ArticleKind(rawValue: s) ?? .auto }
+}
+
+
+/// 标题候选
+struct TitleOption: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var title: String
+    var style = ""              // 数字型 / 悬念型 …
+    var score = 0
+    var reason = ""
+
+    enum CodingKeys: String, CodingKey { case title, style, score, reason }
+    init(title: String, style: String = "", score: Int = 0, reason: String = "") {
+        self.title = title; self.style = style; self.score = score; self.reason = reason
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        style = (try? c.decode(String.self, forKey: .style)) ?? ""
+        score = (try? c.decode(Int.self, forKey: .score)) ?? 0
+        reason = (try? c.decode(String.self, forKey: .reason)) ?? ""
+    }
+}
+
+/// 爆文拆解：只提炼写法，不保存原文
+struct Breakdown: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var url = ""
+    var sourceTitle = ""
+    var titleFormula = ""       // 标题套路
+    var hook = ""               // 开头手法
+    var structure: [String] = []
+    var techniques: [String] = []
+    var ending = ""             // 结尾手法
+    var fitTopics: [String] = []
+    var created = Date()
+
+    enum CodingKeys: String, CodingKey { case id, url, sourceTitle, titleFormula, hook, structure, techniques, ending, fitTopics, created }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        url = (try? c.decode(String.self, forKey: .url)) ?? ""
+        sourceTitle = (try? c.decode(String.self, forKey: .sourceTitle)) ?? ""
+        titleFormula = (try? c.decode(String.self, forKey: .titleFormula)) ?? ""
+        hook = (try? c.decode(String.self, forKey: .hook)) ?? ""
+        structure = (try? c.decode([String].self, forKey: .structure)) ?? []
+        techniques = (try? c.decode([String].self, forKey: .techniques)) ?? []
+        ending = (try? c.decode(String.self, forKey: .ending)) ?? ""
+        fitTopics = (try? c.decode([String].self, forKey: .fitTopics)) ?? []
+        created = (try? c.decode(Date.self, forKey: .created)) ?? Date()
+    }
+
+    /// 给写作提示词用的一段说明
+    var guide: String {
+        var t = "参考写法（来自一篇爆文的拆解，只学方法，不用它的内容、例子和句子）：\n"
+        if !titleFormula.isEmpty { t += "· 标题套路：\(titleFormula)\n" }
+        if !hook.isEmpty { t += "· 开头手法：\(hook)\n" }
+        if !structure.isEmpty { t += "· 结构：" + structure.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "；") + "\n" }
+        if !techniques.isEmpty { t += "· 技巧：" + techniques.joined(separator: "；") + "\n" }
+        if !ending.isEmpty { t += "· 结尾手法：\(ending)\n" }
+        return t
+    }
 }
