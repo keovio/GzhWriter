@@ -29,7 +29,7 @@ struct StylesView: View {
                         .background(selected == s.id ? Theme.blueBg : Theme.sheet, in: Capsule())
                         .overlay(Capsule().stroke(selected == s.id ? Theme.blue.opacity(0.3) : Theme.rule))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowButton())
                 }
             }
 
@@ -143,7 +143,7 @@ struct ModelsView: View {
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected == c.id ? Theme.blue : Theme.rule, lineWidth: selected == c.id ? 1.5 : 1))
                             .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowButton())
                     }
                 }
                 if let id = selected, store.data.connections.contains(where: { $0.id == id }) {
@@ -276,10 +276,10 @@ struct RolesEditor: View {
                                     Text(c.name).font(.system(size: 12))
                                     if i > 0 {
                                         Button { move(role, i, -1) } label: { Image(systemName: "arrow.left").font(.system(size: 9)) }
-                                            .buttonStyle(.plain)
+                                            .buttonStyle(RowButton())
                                     }
                                     Button { remove(role, id) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(RowButton())
                                 }
                                 .foregroundStyle(Theme.ink)
                                 .padding(.horizontal, 9).padding(.vertical, 4)
