@@ -9,8 +9,31 @@ enum Prompts {
     1. 作者的观点、经历和取舍优先，你负责把它们写清楚、写好读，不替作者编造经历。
     2. 不编造数据、案例、引用、政策条文；需要具体数字或出处时，写成【待核实：说明】占位，让作者自己补。
     3. 语言自然口语化，少用"首先/其次/综上所述/在当今社会"这类套话，不用 emoji 堆砌。
-    4. 严格按要求的格式输出，不要多余解释。
+    4. 去 AI 味：不用「不是……而是……」「值得一提的是」「总而言之」「让我们」「赋能」「抓手」这类句式和黑话；不用破折号；结尾不拔高、不喊口号；多用具体场景和短句。
+    5. 严格按要求的格式输出，不要多余解释。
     """
+
+    static func profile(_ s: StylePreset?) -> String {
+        guard let s else { return "" }
+        var t = ""
+        if !s.track.isEmpty { t += "公众号赛道：\(s.track)\n" }
+        if !s.audience.isEmpty { t += "读者：\(s.audience)\n" }
+        if !s.avoid.isEmpty { t += "不写的话题：\(s.avoid)\n" }
+        return t
+    }
+
+    /// 自动选题：从方向 / 热榜 / 赛道里挑一个最值得写的，并替作者拟一个立场
+    static func pickTopic(direction: String, style: StylePreset?, hot: [String], existing: [String]) -> [ChatMessage] {
+        [.system(base), .user("""
+        \(profile(style))
+        \(direction.isEmpty ? "作者没有指定方向，请按赛道和读者自己挑。" : "作者想写的方向：\(direction)")
+        \(hot.isEmpty ? "" : "今日热榜（可以借势，但只选和赛道相关、能写出干货的，不要硬蹭）：\n" + hot.prefix(40).joined(separator: "\n"))
+        \(existing.isEmpty ? "" : "已经写过的标题（不要重复）：" + existing.prefix(40).joined(separator: "；"))
+
+        挑 1 个最值得写的选题，给出切入角度，并写一段这篇文章要表达的核心观点（3 到 5 句，立场鲜明、具体，像作者本人会说的话）。
+        只输出 JSON：{"topic":"选题","angle":"切入角度","viewpoint":"核心观点"}
+        """)]
+    }
 
     static func styleBlock(_ s: StylePreset?) -> String {
         guard let s, !s.sample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
@@ -34,7 +57,7 @@ enum Prompts {
         选题：\(a.topic)
         作者的观点 / 想说的话：\(a.viewpoint)
         \(a.material.isEmpty ? "" : "参考素材（只作参考，不要改写搬运）：\n\(a.material.prefix(5000))")
-        \(style?.avoid.isEmpty == false ? "不写的话题：\(style!.avoid)" : "")
+        \(profile(style))
 
         围绕作者的观点出一份公众号文章大纲：4 到 6 节，每节一行，格式「小标题：这一节要讲的要点」。
         再给一个不标题党的文章标题。
@@ -42,7 +65,7 @@ enum Prompts {
         """)]
     }
 
-    static func section(_ a: Article, index: Int, style: StylePreset?) -> [ChatMessage] {
+    static func section(_ a: Article, index: Int, style: StylePreset?, words: Int = 400) -> [ChatMessage] {
         let all = a.outline.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         let done = a.sections.prefix(index).map { "· \($0.heading)：\($0.body.prefix(80))…" }.joined(separator: "\n")
         return [.system(base + styleBlock(style)), .user("""
@@ -56,7 +79,7 @@ enum Prompts {
         \(done.isEmpty ? "" : "前面已经写好的部分（保持衔接，不要重复）：\n\(done)\n")
         现在只写第 \(index + 1) 节：\(a.outline[index])
 
-        要求：300 到 500 字；段落之间空一行；每段不超过 4 行；可以用 **加粗** 标出一两句关键句，可以用「> 」开头写一句引用。
+        要求：\(max(200, words - 80)) 到 \(words + 120) 字；段落之间空一行；每段不超过 4 行；可以用 **加粗** 标出一两句关键句，可以用「> 」开头写一句引用。
         不要写小标题，只输出这一节的正文。
         """)]
     }
@@ -107,4 +130,5 @@ enum Prompts {
 }
 
 struct IdeasReply: Decodable { let ideas: [IdeaItem]; struct IdeaItem: Decodable { let title: String; let angle: String? } }
+struct TopicReply: Decodable { let topic: String; let angle: String?; let viewpoint: String? }
 struct OutlineReply: Decodable { let title: String?; let outline: [String] }
