@@ -70,7 +70,7 @@ final class Pipeline: ObservableObject {
     @Published var hot: [HotItem] = []
     @Published var hotLoadedAt: Date?
     @Published var lastError: String?
-    private var queue: [(String, UUID?)] = []
+    private var queue: [(String, UUID?, UUID?)] = []
     private var working = false
     private var timer: Timer?
 
@@ -90,16 +90,16 @@ final class Pipeline: ObservableObject {
     }
 
     /// 排入队列，按顺序一篇一篇写
-    func enqueue(direction: String, styleId: UUID?, count: Int = 1) {
-        for _ in 0..<max(1, count) { queue.append((direction, styleId)) }
+    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil) {
+        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId)) }
         if !working { Task { await drain() } }
     }
 
     private func drain() async {
         working = true
         while !queue.isEmpty {
-            let (dir, sid) = queue.removeFirst()
-            await produce(direction: dir, styleId: sid)
+            let (dir, sid, ref) = queue.removeFirst()
+            await produce(direction: dir, styleId: sid, refId: ref)
         }
         working = false
     }
@@ -124,11 +124,12 @@ final class Pipeline: ObservableObject {
     }
 
     @discardableResult
-    func produce(direction: String, styleId: UUID?) async -> UUID {
+    func produce(direction: String, styleId: UUID?, refId: UUID? = nil) async -> UUID {
         let settings = store.data.auto
         let style = store.style(styleId)
+        let ref = store.breakdown(refId)
         let id = store.newArticle(topic: direction)
-        store.update(id) { $0.auto = true; $0.styleId = style?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
+        store.update(id) { $0.auto = true; $0.styleId = style?.id; $0.refId = ref?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
         defer { running[id] = nil }
         do {
             // 1 选题
@@ -138,9 +139,17 @@ final class Pipeline: ObservableObject {
                 if hot.isEmpty || (hotLoadedAt.map { Date().timeIntervalSince($0) > 3600 } ?? true) { await refreshHot() }
                 hotTitles = hot.map(\.title)
             }
-            let existing = store.data.articles.filter { $0.id != id }.map(\.displayTitle)
-            let t = try await store.runJSON(.topic, TopicReply.self,
-                                            Prompts.pickTopic(direction: direction, style: style, hot: hotTitles, existing: existing))
+            let existing = Dedupe.history(store, except: id)
+            var rejected: [String] = []
+            var t = try await store.runJSON(.topic, TopicReply.self,
+                                            Prompts.pickTopic(direction: direction, style: style, hot: hotTitles, existing: existing, ref: ref))
+            // 选题去重：和写过的太像就换，最多换两次
+            while rejected.count < 2, let near = Dedupe.closest(t.topic, in: existing), near.1 >= Dedupe.threshold {
+                log(id, "「\(t.topic)」和写过的「\(near.0)」太像，换一个")
+                rejected.append(t.topic)
+                t = try await store.runJSON(.topic, TopicReply.self,
+                                            Prompts.pickTopic(direction: direction, style: style, hot: hotTitles, existing: existing, avoidSimilar: rejected, ref: ref))
+            }
             store.update(id) {
                 $0.topic = t.topic
                 $0.viewpoint = t.viewpoint ?? ""
@@ -151,7 +160,7 @@ final class Pipeline: ObservableObject {
             // 2 大纲
             log(id, "定文章类型、写大纲")
             guard let a1 = store.article(id) else { return id }
-            let o = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(a1, style: style))
+            let o = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(a1, style: style, ref: ref))
             store.update(id) {
                 if let tt = o.title, !tt.isEmpty { $0.title = tt }
                 if $0.kind == "auto", let k = o.kind, let kk = ArticleKind(rawValue: k), kk != .auto { $0.kind = kk.rawValue }
@@ -166,7 +175,7 @@ final class Pipeline: ObservableObject {
             for i in 0..<n {
                 log(id, "写第 \(i + 1)/\(n) 部分")
                 guard let a = store.article(id), i < a.sections.count else { break }
-                let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per))
+                let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per, ref: ref))
                 store.update(id) { if i < $0.sections.count { $0.sections[i].body = Humanize.clean(text) } }
             }
 
@@ -196,6 +205,26 @@ final class Pipeline: ObservableObject {
             if let b = best, let cur = store.article(id), (cur.review?.total ?? 0) < b.score {
                 store.update(id) { $0.sections = b.sections; $0.review = b.review }
                 log(id, "回退到最高分版本（\(b.score)）")
+            }
+
+            // 敏感词：自动改掉
+            if settings.autoCompliance {
+                do {
+                    let n = try await Compliance.autoFix(store, id) { self.log(id, $0) }
+                    if n > 0 { log(id, "改掉了 \(n) 部分的敏感用语") }
+                } catch { log(id, "敏感词修改出错：\(error.localizedDescription)") }
+            }
+
+            // 标题多选：换上最高分的
+            if settings.autoTitle {
+                log(id, "想 5 个标题")
+                do {
+                    try await TitleMaker.make(store, id)
+                    if let top = store.article(id)?.titleOptions.first, !top.title.isEmpty {
+                        store.update(id) { $0.title = top.title }
+                        log(id, "标题换成「\(top.title)」（\(top.score) 分）")
+                    }
+                } catch { log(id, "标题生成出错：\(error.localizedDescription)") }
             }
 
             // 5 排版
