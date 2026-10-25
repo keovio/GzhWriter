@@ -4,7 +4,8 @@ import SwiftUI
 /// 稿件图片：存在 ~/Library/Application Support/GzhWriter/images/<稿件id>/
 enum ImageStore {
     static func dir(_ articleId: UUID) -> URL {
-        let d = Store.folder.appendingPathComponent("images/\(articleId.uuidString)", isDirectory: true)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let d = base.appendingPathComponent("GzhWriter/images/\(articleId.uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }
