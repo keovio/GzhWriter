@@ -10,6 +10,7 @@ struct WorkbenchView: View {
     @State private var direction = ""
     @State private var styleId: UUID?
     @State private var count = 1
+    @State private var refId: UUID?
     @State private var showAllHot = false
 
     var greeting: String {
@@ -119,6 +120,15 @@ struct WorkbenchView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.rule))
                 }
+                if !store.data.breakdowns.isEmpty {
+                    labeled("参考写法") {
+                        Picker("", selection: $refId) {
+                            Text("不参考").tag(UUID?.none)
+                            ForEach(store.data.breakdowns) { Text($0.sourceTitle).tag(Optional($0.id)) }
+                        }
+                        .labelsHidden().frame(width: 150)
+                    }
+                }
                 Text("约 \(store.data.auto.targetWords) 字 · 不到 \(store.data.auto.passScore) 分自动返修")
                     .font(.system(size: 12)).foregroundStyle(Theme.faint)
                 Spacer()
@@ -129,7 +139,7 @@ struct WorkbenchView: View {
                 .disabled(store.data.connections.isEmpty)
             }
             HStack(spacing: 6) {
-                ForEach(["选题", "大纲", "正文", "审稿", "返修", "排版"], id: \.self) { s in
+                ForEach(["选题", "大纲", "正文", "审稿", "返修", "敏感词", "标题", "排版"], id: \.self) { s in
                     Chip(text: s)
                     if s != "排版" { Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(Theme.faint) }
                 }
@@ -148,7 +158,7 @@ struct WorkbenchView: View {
     }
 
     func go() {
-        pipeline.enqueue(direction: direction.trimmingCharacters(in: .whitespacesAndNewlines), styleId: styleId, count: count)
+        pipeline.enqueue(direction: direction.trimmingCharacters(in: .whitespacesAndNewlines), styleId: styleId, count: count, refId: refId)
         direction = ""
     }
 
@@ -413,6 +423,14 @@ struct AutoSettingsView: View {
                 Divider()
                 SettingRow(label: "参考热榜", hint: "自动选题时参考头条、百度热榜，只选和赛道相关的") {
                     Toggle("", isOn: b(\.useHot)).toggleStyle(.switch).labelsHidden()
+                }
+                Divider()
+                SettingRow(label: "自动改敏感词", hint: "审完稿扫一遍极限词、收益承诺、诱导分享、站外引流，有就让 AI 改掉") {
+                    Toggle("", isOn: b(\.autoCompliance)).toggleStyle(.switch).labelsHidden()
+                }
+                Divider()
+                SettingRow(label: "自动选标题", hint: "出 5 个不同风格的标题打分，换上分数最高的；稿件里可以再换") {
+                    Toggle("", isOn: b(\.autoTitle)).toggleStyle(.switch).labelsHidden()
                 }
             }
             .card()
