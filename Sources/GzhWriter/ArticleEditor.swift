@@ -18,7 +18,7 @@ struct ArticleEditor: View {
         Binding(get: { a[keyPath: kp] }, set: { v in edit { $0[keyPath: kp] = v } })
     }
 
-    func sectionField(_ id: UUID, _ kp: WritableKeyPath<Section, String>) -> Binding<String> {
+    func sectionField(_ id: UUID, _ kp: WritableKeyPath<ArticleSection, String>) -> Binding<String> {
         Binding(
             get: { a.sections.first(where: { $0.id == id })?[keyPath: kp] ?? "" },
             set: { v in edit { art in
@@ -387,8 +387,8 @@ struct ArticleEditor: View {
             art.sections = art.outline.enumerated().map { i, line in
                 let h = Self.headingOf(line)
                 if let keep = old.first(where: { $0.heading == h }) { return keep }
-                if i < old.count, old[i].body.isEmpty { return Section(id: old[i].id, heading: h, body: "") }
-                return Section(heading: h, body: "")
+                if i < old.count, old[i].body.isEmpty { return ArticleSection(id: old[i].id, heading: h, body: "") }
+                return ArticleSection(heading: h, body: "")
             }
             art.stage = .draft
         }
