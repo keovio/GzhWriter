@@ -40,7 +40,7 @@ enum Layout {
             .filter { !$0.isEmpty }
     }
 
-    static func html(_ a: Article) -> String {
+    static func html(_ a: Article, signature: String = "") -> String {
         let ac = a.accent
         let fs = a.fontSize
         let p = "margin:0 0 1.2em;font-size:\(fs)px;line-height:1.9;letter-spacing:0.5px;color:#3a3a3a;text-align:justify;"
@@ -78,6 +78,9 @@ enum Layout {
                 out += block
             }
         }
+        if !signature.isEmpty {
+            out += "<p style=\"margin:2em 0 0;text-align:center;font-size:\(fs - 1)px;color:\(ac);\">\(inline(signature, accent: ac))</p>"
+        }
         if a.aiNotice {
             out += "<p style=\"margin:2em 0 0;font-size:12px;color:#999;text-align:center;\">本文由作者在 AI 辅助下完成，观点与内容经作者审定。</p>"
         }
@@ -86,20 +89,20 @@ enum Layout {
     }
 
     /// 预览页：模拟手机宽度
-    static func previewPage(_ a: Article) -> String {
+    static func previewPage(_ a: Article, signature: String = "") -> String {
         let title = a.title.isEmpty ? "" :
             "<h1 style=\"font-size:22px;line-height:1.4;margin:0 0 14px;color:#111;\">\(esc(a.title))</h1>"
         return """
         <!doctype html><html><head><meta charset="utf-8">
         <meta name="viewport" content="width=device-width,initial-scale=1">
         <style>body{margin:0;background:#EDEFF3;} .phone{max-width:375px;margin:16px auto;background:#fff;padding:22px 16px 40px;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.08);}</style>
-        </head><body><div class="phone">\(title)\(html(a))</div></body></html>
+        </head><body><div class="phone">\(title)\(html(a, signature: signature))</div></body></html>
         """
     }
 
     /// 复制为富文本，直接粘到公众号编辑器
-    static func copyRichText(_ a: Article) {
-        let body = html(a)
+    static func copyRichText(_ a: Article, signature: String = "") {
+        let body = html(a, signature: signature)
         let pb = NSPasteboard.general
         pb.clearContents()
         let full = "<html><head><meta charset=\"utf-8\"></head><body>\(body)</body></html>"
