@@ -37,7 +37,7 @@ enum ImageStore {
     }
 }
 
-/// 文生图：用智谱 CogView（OpenAI 风格的 /images/generations）
+/// 文生图：智谱 GLM-Image / CogView-4（/images/generations）
 enum ImageGen {
     /// 找一个能画图的连接（目前认智谱）
     @MainActor static func connection(_ store: Store) -> ModelConnection? {
@@ -46,22 +46,40 @@ enum ImageGen {
         }
     }
 
-    enum Size: String { case wide = "1440x720", section = "1344x768" }
+    enum Size { case wide, section }
+
+    /// 先用 GLM-Image（0.1 元/张），账号没开通时退回 CogView-4（0.06 元/张）
+    static let models: [(String, wide: String, section: String)] = [
+        ("glm-image", "1728x960", "1472x1088"),
+        ("cogView-4-250304", "1440x720", "1344x768"),
+    ]
 
     static func generate(_ conn: ModelConnection, prompt: String, size: Size) async throws -> Data {
+        var last: Error = LLMError.empty
+        for m in models {
+            do {
+                return try await generate(conn, model: m.0, prompt: prompt, size: size == .wide ? m.wide : m.section)
+            } catch LLMError.http(let code, let body) where code == 400 || code == 404 || body.contains("模型") {
+                last = LLMError.http(code, body)    // 模型不可用，换下一个
+            }
+        }
+        throw last
+    }
+
+    static func generate(_ conn: ModelConnection, model: String, prompt: String, size: String) async throws -> Data {
         guard let key = Keychain.get(conn.id.uuidString), !key.isEmpty else { throw LLMError.noKey(conn.name) }
         var base = conn.baseURL.trimmingCharacters(in: .whitespaces)
         while base.hasSuffix("/") { base.removeLast() }
         guard let u = URL(string: base + "/images/generations") else { throw LLMError.badURL(base) }
         var req = URLRequest(url: u)
         req.httpMethod = "POST"
-        req.timeoutInterval = 120
+        req.timeoutInterval = 180
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.httpBody = try JSONSerialization.data(withJSONObject: [
-            "model": "cogView-4-250304",
+            "model": model,
             "prompt": String(prompt.prefix(900)),
-            "size": size.rawValue,
+            "size": size,
         ])
         let (data, resp) = try await URLSession.shared.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
