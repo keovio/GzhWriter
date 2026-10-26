@@ -1,0 +1,24 @@
+{
+  "name": "gzhwriter",
+  "productName": "公众号写稿助手",
+  "version": "0.1.0",
+  "description": "公众号写稿助手 Windows 版",
+  "main": "main.js",
+  "author": "keovi",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.1",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.keovi.gzhwriter",
+    "productName": "公众号写稿助手",
+    "artifactName": "GzhWriter-${version}-${arch}-${target}.${ext}",
+    "files": ["main.js", "preload.js", "renderer/**/*"],
+    "win": { "target": ["nsis", "portable"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "公众号写稿助手" }
+  }
+}
