@@ -70,13 +70,18 @@ final class Pipeline: ObservableObject {
     @Published var hot: [HotItem] = []
     @Published var hotLoadedAt: Date?
     @Published var lastError: String?
-    private var queue: [(String, UUID?, UUID?)] = []
+    private var queue: [(String, UUID?, UUID?, UUID?)] = []   // 方向、账号、参考拆解、要续写的稿件
     private var working = false
     private var timer: Timer?
 
     init(store: Store) {
         self.store = store
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // 上次软件关掉时没写完的一键成稿，标成可继续
+        for a in store.data.articles where a.auto && a.failed.isEmpty && a.stage != .layout
+            && !(a.log.last ?? "").contains("完成") {
+            store.update(a.id) { $0.failed = "上次没写完（软件被关了或中断）" }
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkDaily(); self?.checkReminders() }
         }
@@ -91,15 +96,28 @@ final class Pipeline: ObservableObject {
 
     /// 排入队列，按顺序一篇一篇写
     func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil) {
-        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId)) }
+        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId, nil)) }
         if !working { Task { await drain() } }
     }
+
+    /// 从出错的地方接着写：已经写好的选题、大纲、段落都保留
+    func resume(_ id: UUID) {
+        guard running[id] == nil, !queue.contains(where: { $0.3 == id }), let a = store.article(id) else { return }
+        store.update(id) { $0.failed = "" }
+        running[id] = "排队中，等前面的写完"
+        queue.append((a.topic, a.styleId, a.refId, id))
+        if !working { Task { await drain() } }
+    }
+
+    /// 所有出错停下的稿件
+    var failedArticles: [Article] { store.data.articles.filter { !$0.failed.isEmpty && running[$0.id] == nil } }
 
     private func drain() async {
         working = true
         while !queue.isEmpty {
-            let (dir, sid, ref) = queue.removeFirst()
-            await produce(direction: dir, styleId: sid, refId: ref)
+            let (dir, sid, ref, rid) = queue.removeFirst()
+            if let rid { await work(rid, direction: dir, styleId: sid, refId: ref, resumed: true) }
+            else { await produce(direction: dir, styleId: sid, refId: ref) }
         }
         working = false
     }
@@ -137,13 +155,64 @@ final class Pipeline: ObservableObject {
 
     @discardableResult
     func produce(direction: String, styleId: UUID?, refId: UUID? = nil) async -> UUID {
-        let settings = store.data.auto
         let style = store.style(styleId)
         let ref = store.breakdown(refId)
         let id = store.newArticle(topic: direction)
         store.update(id) { $0.auto = true; $0.styleId = style?.id; $0.refId = ref?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
-        defer { running[id] = nil }
+        await work(id, direction: direction, styleId: styleId, refId: refId, resumed: false)
+        return id
+    }
+
+    /// 真正干活的流程。每一步先看稿件里是不是已经有了，有就跳过，所以出错后可以接着跑。
+    /// 模型临时出错（超时、限流）会自动等一会儿再接着跑，最多 2 次。
+    func work(_ id: UUID, direction: String, styleId: UUID?, refId: UUID?, resumed: Bool) async {
+        var attempt = 0
+        var step = ""
+        while true {
+            do {
+                try await steps(id, direction: direction, styleId: styleId, refId: refId, resumed: resumed || attempt > 0)
+                store.update(id) { $0.failed = "" }
+                if lastError != nil, failedArticles.isEmpty { lastError = nil }
+                break
+            } catch {
+                let msg = error.localizedDescription
+                if attempt == 0 { step = running[id] ?? "" }
+                attempt += 1
+                if attempt <= 2 && Self.transient(error) {
+                    log(id, "出错：\(msg)。\(attempt * 15) 秒后自动接着写（第 \(attempt) 次）")
+                    try? await Task.sleep(nanoseconds: UInt64(attempt * 15) * 1_000_000_000)
+                    continue
+                }
+                log(id, "停下了：\(msg)")
+                store.update(id) { $0.failed = (step.isEmpty ? "" : "在「\(step)」这一步") + "出错：" + msg }
+                lastError = "《\(store.article(id)?.displayTitle ?? "")》" + msg
+                notify("自动写稿停下了", msg + "。在工作台点「接着写」可以从断点继续。")
+                break
+            }
+        }
+        running[id] = nil
+    }
+
+    /// 没填 Key、地址不对这种，重试也没用
+    static func transient(_ error: Error) -> Bool {
+        if let e = error as? LLMError {
+            switch e {
+            case .noConnection, .noKey, .badURL: return false
+            case .http(let code, _): return code == 429 || code >= 500
+            default: return true
+            }
+        }
+        return true
+    }
+
+    private func steps(_ id: UUID, direction: String, styleId: UUID?, refId: UUID?, resumed: Bool) async throws {
+        let settings = store.data.auto
+        let style = store.style(styleId)
+        let ref = store.breakdown(refId)
+        if resumed { log(id, "从断点接着写") }
         do {
+          if store.article(id)?.sections.isEmpty ?? true,
+             let cur = store.article(id), !resumed || cur.viewpoint.isEmpty {
             // 1 选题
             log(id, "选题")
             var hotTitles: [String] = []
@@ -171,17 +240,21 @@ final class Pipeline: ObservableObject {
                 if let a = t.angle, !a.isEmpty { $0.material = "切入角度：\(a)" }
             }
             log(id, "选题：\(t.topic)")
+          }
 
             // 素材库：挑相关的真实素材
             var mats: [Material] = []
-            if settings.useMaterials && !store.data.materials.isEmpty {
+            if let ids = store.article(id)?.materialIds, !ids.isEmpty {
+                mats = store.data.materials.filter { ids.contains($0.id) }
+            } else if settings.useMaterials && !store.data.materials.isEmpty {
                 mats = MaterialPicker.attach(store, id)
                 if !mats.isEmpty { log(id, "用上 \(mats.count) 条素材") }
             }
 
             // 2 大纲
+            guard let a1 = store.article(id) else { return }
+            if a1.sections.isEmpty {
             log(id, "定文章类型、写大纲")
-            guard let a1 = store.article(id) else { return id }
             let o = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(a1, style: style, ref: ref, mats: mats))
             store.update(id) {
                 if let tt = o.title, !tt.isEmpty { $0.title = tt }
@@ -190,13 +263,15 @@ final class Pipeline: ObservableObject {
                 $0.sections = o.outline.map { ArticleSection(heading: ArticleEditor.headingOf($0), body: "") }
                 $0.stage = .draft
             }
+            }
 
-            // 3 正文
-            let n = max(1, o.outline.count)
+            // 3 正文（已经写好的部分跳过）
+            let n = max(1, store.article(id)?.sections.count ?? 1)
             let per = max(250, settings.targetWords / n)
             for i in 0..<n {
-                log(id, "写第 \(i + 1)/\(n) 部分")
                 guard let a = store.article(id), i < a.sections.count else { break }
+                if !a.sections[i].body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
+                log(id, "写第 \(i + 1)/\(n) 部分")
                 let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per, ref: ref, mats: mats))
                 store.update(id) { if i < $0.sections.count { $0.sections[i].body = Humanize.clean(text) } }
             }
@@ -281,12 +356,7 @@ final class Pipeline: ObservableObject {
             log(id, "完成，\(score) 分，等你过目")
             notify(pushed ? "已进公众号草稿箱（\(score) 分）" : "草稿写好了（\(score) 分）",
                    (store.article(id)?.displayTitle ?? "") + (pushed ? "，在手机上看一眼再发表" : "") + (when.isEmpty ? "" : "。计划 \(when) 发"))
-        } catch {
-            log(id, "出错：\(error.localizedDescription)")
-            lastError = error.localizedDescription
-            notify("自动写稿失败", error.localizedDescription)
         }
-        return id
     }
 
     func notify(_ title: String, _ body: String) {
