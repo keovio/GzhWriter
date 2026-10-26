@@ -73,44 +73,100 @@ enum Publisher {
         }
     }
 
-    // MARK: 头条号、百家号版本
+    // MARK: 各平台版本
 
-    struct VariantReply: Decodable {
+    struct LongReply: Decodable {
         let digest: String?
-        let toutiao: PlatformVariant
-        let baijiahao: PlatformVariant
+        let toutiao: PlatformVariant?
+        let baijiahao: PlatformVariant?
+        let zhihu: PlatformVariant?
     }
 
-    static func makeVariants(_ store: Store, _ id: UUID) async throws {
-        guard let a = store.article(id) else { return }
-        let firstPara = Layout.paragraphs(a.sections.first?.body ?? "").first ?? ""
-        let msg: [ChatMessage] = [
-            .system("""
-            你帮作者把一篇公众号文章改成头条号和百家号版本。正文主体不变，只改标题、开头一段和标签。
-            头条号：标题 20 到 30 字，口语、有具体信息或数字，开头一段两三句直接抛出读者关心的问题。
-            百家号：标题规范克制，不夸张不标题党，不用感叹号和问号连用，开头一段交代清楚这篇讲什么。
-            两个平台都不能出现「公众号」「关注我」「点击在看」「微信」等站外引导。
-            不使用「不是……而是……」句式，不用破折号。只输出 JSON。
-            """),
-            .user("""
-            原标题：\(a.displayTitle)
-            原开头：\(firstPara)
-            全文：
-            \(a.plainText.prefix(3500))
+    struct ShortReply: Decodable {
+        let xiaohongshu: PlatformVariant?
+        let weibo: PlatformVariant?
+    }
 
-            输出 JSON：{"digest":"公众号摘要，40 字内","toutiao":{"title":"","intro":"","tags":["",""]},"baijiahao":{"title":"","intro":"","tags":["",""]}}
-            """),
-        ]
-        let r = try await store.runJSON(.draft, VariantReply.self, msg)
-        store.update(id) {
-            $0.variants["toutiao"] = r.toutiao
-            $0.variants["baijiahao"] = r.baijiahao
-            if let d = r.digest, !d.isEmpty { $0.digest = d }
+    static let platformRules = """
+    所有平台版本都不能出现「公众号」「关注我」「点击在看」「微信」「加我」等站外引导。
+    不使用「不是……而是……」句式，不用破折号，不编造原文没有的数据和经历。只输出 JSON。
+    """
+
+    /// 按「我的平台」生成各平台版本。only 不为空时只重写这些平台。
+    static func makeVariants(_ store: Store, _ id: UUID, only: [Platform] = []) async throws {
+        guard let a = store.article(id) else { return }
+        let targets = only.isEmpty ? Platform.others(store) : only
+        let long = targets.filter(\.isLongForm)
+        let short = targets.filter { !$0.isLongForm && $0 != .wechat }
+        let firstPara = Layout.paragraphs(a.sections.first?.body ?? "").first ?? ""
+
+        if !long.isEmpty || only.isEmpty {
+            let rules = long.map(\.rule).joined(separator: "\n")
+            let shape = long.map { "\"\($0.rawValue)\":{\"title\":\"\",\"intro\":\"\",\"tags\":[\"\"]}" }.joined(separator: ",")
+            let msg: [ChatMessage] = [
+                .system("""
+                你帮作者把一篇公众号文章改成其他长文平台的版本。正文主体不变，只改标题、开头一段和标签。
+                \(rules)
+                \(platformRules)
+                """),
+                .user("""
+                原标题：\(a.displayTitle)
+                原开头：\(firstPara)
+                全文：
+                \(a.plainText.prefix(3500))
+
+                输出 JSON：{"digest":"公众号摘要，40 字内"\(shape.isEmpty ? "" : "," + shape)}
+                """),
+            ]
+            let r = try await store.runJSON(.draft, LongReply.self, msg)
+            store.update(id) { art in
+                for (p, v) in [(Platform.toutiao, r.toutiao), (.baijiahao, r.baijiahao), (.zhihu, r.zhihu)] {
+                    guard long.contains(p), var v else { continue }
+                    v.posted = art.variants[p.rawValue]?.posted ?? false
+                    v.postedAt = art.variants[p.rawValue]?.postedAt
+                    art.variants[p.rawValue] = v
+                }
+                if let d = r.digest, !d.isEmpty { art.digest = d }
+            }
+        }
+
+        if !short.isEmpty {
+            let rules = short.map(\.rule).joined(separator: "\n")
+            let shape = short.map {
+                $0 == .weibo ? "\"weibo\":{\"body\":\"\",\"tags\":[\"\"]}" : "\"\($0.rawValue)\":{\"title\":\"\",\"body\":\"\",\"tags\":[\"\"]}"
+            }.joined(separator: ",")
+            let msg: [ChatMessage] = [
+                .system("""
+                你帮作者把一篇公众号长文改写成短内容平台的版本。保留原文的核心观点和最有用的一两个细节，按平台习惯重写，不要缩写成摘要腔。
+                \(rules)
+                正文段落之间空一行；标签不带 # 号。
+                \(platformRules)
+                """),
+                .user("""
+                原标题：\(a.displayTitle)
+                全文：
+                \(a.plainText.prefix(4000))
+
+                输出 JSON：{\(shape)}
+                """),
+            ]
+            let r = try await store.runJSON(.draft, ShortReply.self, msg)
+            store.update(id) { art in
+                for (p, v) in [(Platform.xiaohongshu, r.xiaohongshu), (.weibo, r.weibo)] {
+                    guard short.contains(p), var v else { continue }
+                    v.posted = art.variants[p.rawValue]?.posted ?? false
+                    v.postedAt = art.variants[p.rawValue]?.postedAt
+                    art.variants[p.rawValue] = v
+                }
+            }
         }
     }
 
     /// 平台版纯净 HTML（不带公众号的花哨样式和站外引导）
     static func platformHTML(_ a: Article, _ v: PlatformVariant) -> String {
+        if !v.body.isEmpty {
+            return Layout.paragraphs(v.body).map { "<p>\(Layout.esc($0))</p>" }.joined()
+        }
         var out = ""
         let intro = v.intro.trimmingCharacters(in: .whitespacesAndNewlines)
         for (i, sec) in a.sections.enumerated() {
@@ -126,6 +182,7 @@ enum Publisher {
     }
 
     static func platformPlain(_ a: Article, _ v: PlatformVariant) -> String {
+        if !v.body.isEmpty { return v.body }
         var out: [String] = []
         let intro = v.intro.trimmingCharacters(in: .whitespacesAndNewlines)
         for (i, sec) in a.sections.enumerated() {
@@ -135,6 +192,13 @@ enum Publisher {
             out += paras.map { $0.replacingOccurrences(of: "**", with: "") }
         }
         return out.joined(separator: "\n\n")
+    }
+
+    /// 带标签的完整文字（小红书、微博直接贴这个）
+    static func platformFull(_ a: Article, _ v: PlatformVariant) -> String {
+        var s = platformPlain(a, v)
+        if !v.tags.isEmpty { s += "\n\n" + v.tags.map { "#" + $0 }.joined(separator: " ") }
+        return s
     }
 
     static func copyPlatform(_ a: Article, _ v: PlatformVariant) {
