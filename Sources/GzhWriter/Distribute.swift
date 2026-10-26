@@ -14,7 +14,7 @@ struct DistributeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                SectionTitle(text: "配图与分发", hint: "都只是准备好，发不发由你")
+                SectionTitle(text: "配图与多平台分发", hint: "都只是准备好，发不发由你")
                 Spacer()
             }
             BusyBar(busy: busy)
@@ -67,28 +67,32 @@ struct DistributeCard: View {
             // 其他平台
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
-                    ForEach([("toutiao", "头条号"), ("baijiahao", "百家号")], id: \.0) { key, name in
-                        Button(name) { platform = key }
-                            .buttonStyle(RowButton())
-                            .font(.system(size: 12, weight: platform == key ? .semibold : .regular))
-                            .foregroundStyle(platform == key ? Theme.blue : Theme.sub)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(platform == key ? Theme.blueBg : Color.clear, in: Capsule())
-                    }
+                    ForEach(Platform.others(store)) { p in platformChip(p) }
                     Spacer()
-                    Button(a.variants.isEmpty ? "生成平台版本" : "重新生成") { runVariants() }
-                        .buttonStyle(LinkButton()).disabled(busy.label != nil)
+                    if !Platform.others(store).isEmpty {
+                        Button(a.variants.isEmpty ? "一键生成全部平台版本" : "全部重新生成") { runVariants([]) }
+                            .buttonStyle(LinkButton()).disabled(busy.label != nil)
+                    }
                 }
-                if let v = a.variants[platform] {
-                    variantView(v)
+                if let p = current {
+                    if let v = a.variants[p.rawValue] {
+                        variantView(p, v)
+                    } else {
+                        HStack {
+                            Text("\(p.name)版本还没生成。一键成稿会自动出，手动写的点这里。")
+                                .font(.system(size: 12)).foregroundStyle(Theme.sub)
+                            Spacer()
+                            Button("生成\(p.name)版本") { runVariants([p]) }
+                                .buttonStyle(GhostButton()).disabled(busy.label != nil)
+                        }
+                        .padding(.vertical, 6)
+                    }
                 } else {
-                    Text("还没生成。一键成稿会自动出；手动写的点右上角生成。")
-                        .font(.system(size: 12)).foregroundStyle(Theme.sub).padding(.vertical, 6)
+                    Text("到「发布与分发」里勾选你在做的平台。").font(.system(size: 12)).foregroundStyle(Theme.sub)
                 }
             }
             .padding(14)
             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
-        }
         .card()
     }
 
@@ -104,31 +108,120 @@ struct DistributeCard: View {
         }
     }
 
-    func variantView(_ v: PlatformVariant) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                Text(v.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).textSelection(.enabled)
-                Spacer()
-                copyButton("标题", key: "t") { Publisher.copyText(v.title) }
+    var current: Platform? {
+        let list = Platform.others(store)
+        if let p = Platform.of(platform), list.contains(p) { return p }
+        return list.first
+    }
+
+    func platformChip(_ p: Platform) -> some View {
+        let on = current == p
+        let v = a.variants[p.rawValue]
+        let dot: Color = v == nil ? Theme.rule : (v!.posted ? Theme.green : p.color)
+        return Button { platform = p.rawValue } label: {
+            HStack(spacing: 5) {
+                Circle().fill(dot).frame(width: 6, height: 6)
+                Text(p.name)
             }
-            if !v.intro.isEmpty {
-                Text(v.intro).font(.system(size: 12)).foregroundStyle(Theme.sub).lineLimit(3)
+            .font(.system(size: 12, weight: on ? .semibold : .regular))
+            .foregroundStyle(on ? Theme.blue : Theme.sub)
+            .padding(.horizontal, 12).padding(.vertical, 5)
+            .background(on ? Theme.blueBg : Color.clear, in: Capsule())
+        }
+        .buttonStyle(RowButton())
+        .help(v == nil ? "还没生成" : (v!.posted ? "已发" : "已生成，未发"))
+    }
+
+    func vb(_ p: Platform, _ kp: WritableKeyPath<PlatformVariant, String>) -> Binding<String> {
+        Binding(get: { a.variants[p.rawValue]?[keyPath: kp] ?? "" },
+                set: { nv in store.update(articleId) { $0.variants[p.rawValue, default: PlatformVariant()][keyPath: kp] = nv } })
+    }
+
+    func tagsBinding(_ p: Platform) -> Binding<String> {
+        Binding(get: { (a.variants[p.rawValue]?.tags ?? []).joined(separator: " ") },
+                set: { nv in
+                    let tags = nv.split(whereSeparator: { $0 == " " || $0 == "," || $0 == "，" || $0 == "#" }).map(String.init)
+                    store.update(articleId) { $0.variants[p.rawValue, default: PlatformVariant()].tags = tags }
+                })
+    }
+
+    func variantView(_ p: Platform, _ v: PlatformVariant) -> some View {
+        let hits = Compliance.scanText(v.title + "\n" + v.intro + "\n" + v.body)
+        return VStack(alignment: .leading, spacing: 8) {
+            if p != .weibo {
+                HStack(spacing: 8) {
+                    Text("标题").font(.system(size: 12)).foregroundStyle(Theme.sub).frame(width: 52, alignment: .leading)
+                    TextField("", text: vb(p, \.title)).fieldBox()
+                    Text("\(v.title.count) 字").font(.system(size: 11)).foregroundStyle(v.title.count > (p == .xiaohongshu ? 20 : 30) ? Theme.orange : Theme.faint)
+                }
             }
-            HStack(spacing: 6) {
-                ForEach(v.tags, id: \.self) { Chip(text: "#\($0)") }
+            if p.isLongForm {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("开头").font(.system(size: 12)).foregroundStyle(Theme.sub).frame(width: 52, alignment: .leading)
+                    TextEditor(text: vb(p, \.intro)).font(.system(size: 13)).frame(height: 66)
+                        .padding(4).background(Color.white, in: RoundedRectangle(cornerRadius: 6))
+                }
+                Text("正文其余部分沿用主稿，去掉了公众号的引导语。").font(.system(size: 11)).foregroundStyle(Theme.faint).padding(.leading, 60)
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    Text("正文").font(.system(size: 12)).foregroundStyle(Theme.sub).frame(width: 52, alignment: .leading)
+                    TextEditor(text: vb(p, \.body)).font(.system(size: 13)).frame(height: 220)
+                        .padding(4).background(Color.white, in: RoundedRectangle(cornerRadius: 6))
+                }
+                Text("\(v.body.filter { !$0.isWhitespace }.count) 字").font(.system(size: 11)).foregroundStyle(Theme.faint).padding(.leading, 60)
+            }
+            HStack(spacing: 8) {
+                Text("标签").font(.system(size: 12)).foregroundStyle(Theme.sub).frame(width: 52, alignment: .leading)
+                TextField("空格分开", text: tagsBinding(p)).fieldBox()
+            }
+            if !hits.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.orange).font(.system(size: 11))
+                    Text("可能不合规：" + hits.map { "「\($0.word)」\($0.category)" }.joined(separator: "、"))
+                        .font(.system(size: 11)).foregroundStyle(Theme.orange).lineLimit(2)
+                }
+                .padding(.leading, 60)
             }
             HStack(spacing: 10) {
-                copyButton("复制正文", key: "b") { Publisher.copyPlatform(a, v) }
-                if !v.tags.isEmpty { copyButton("复制标签", key: "g") { Publisher.copyText(v.tags.joined(separator: " ")) } }
+                if p != .weibo { copyButton("复制标题", key: "t") { Publisher.copyText(v.title) } }
+                copyButton("复制正文", key: "b") {
+                    if p.isLongForm { Publisher.copyPlatform(a, v) } else { Publisher.copyText(Publisher.platformFull(a, v)) }
+                }
+                if p.isLongForm && !v.tags.isEmpty { copyButton("复制标签", key: "g") { Publisher.copyText(v.tags.joined(separator: " ")) } }
                 if !a.cover.isEmpty { Button("封面图") { ImageStore.reveal(articleId) }.buttonStyle(GhostButton()) }
+                Button("重写") { runVariants([p]) }.buttonStyle(LinkButton()).disabled(busy.label != nil)
                 Spacer()
                 Button {
-                    PlatformFill.open(store: store, articleId: articleId, platform: platform)
+                    store.update(articleId) {
+                        let now = !($0.variants[p.rawValue]?.posted ?? false)
+                        $0.variants[p.rawValue, default: PlatformVariant()].posted = now
+                        $0.variants[p.rawValue, default: PlatformVariant()].postedAt = now ? Date() : nil
+                    }
                 } label: {
-                    HStack(spacing: 4) { Image(systemName: "square.and.pencil"); Text("打开\(platform == "toutiao" ? "头条号" : "百家号")并自动填入") }
+                    HStack(spacing: 4) {
+                        Image(systemName: v.posted ? "checkmark.circle.fill" : "circle")
+                        Text(v.posted ? "已发" : "我发了")
+                    }
                 }
-                .buttonStyle(PrimaryButton())
-                .help("在 app 里打开发文页，自动填标题和正文；发布按钮你自己点")
+                .buttonStyle(GhostButton())
+                if p.fillable {
+                    Button {
+                        PlatformFill.open(store: store, articleId: articleId, platform: p.rawValue)
+                    } label: {
+                        HStack(spacing: 4) { Image(systemName: "square.and.pencil"); Text("打开\(p.name)并自动填入") }
+                    }
+                    .buttonStyle(PrimaryButton())
+                    .help("在 app 里打开发文页，自动填标题和正文；发布按钮你自己点")
+                } else {
+                    Button {
+                        Publisher.copyText(Publisher.platformFull(a, v))
+                        NSWorkspace.shared.open(p.publishURL)
+                        flash(platform + "w")
+                    } label: {
+                        HStack(spacing: 4) { Image(systemName: "arrow.up.forward.app"); Text(copiedKey == platform + "w" ? "已复制，去粘贴" : "复制并打开\(p.name)") }
+                    }
+                    .buttonStyle(PrimaryButton())
+                }
             }
             .padding(.top, 2)
         }
@@ -171,9 +264,10 @@ struct DistributeCard: View {
         }
     }
 
-    func runVariants() {
-        busy.run("正在改写头条号、百家号版本…") {
-            try await Publisher.makeVariants(store, articleId)
+    func runVariants(_ only: [Platform]) {
+        let names = (only.isEmpty ? Platform.others(store) : only).map(\.name).joined(separator: "、")
+        busy.run("正在改写\(names)版本…") {
+            try await Publisher.makeVariants(store, articleId, only: only)
         }
     }
 
@@ -202,7 +296,7 @@ struct PublishSettingsView: View {
 
     var body: some View {
         Page(maxWidth: 840) {
-            PageHeader(title: "发布与分发", subtitle: "写完自动配图、推到公众号草稿箱、出头条号和百家号版本。不会替你点发表。")
+            PageHeader(title: "发布与分发", subtitle: "选你在做的平台。写完自动配图、推公众号草稿箱、出各平台版本。不会替你点发布。")
 
             VStack(alignment: .leading, spacing: 0) {
                 SectionTitle(text: "公众号草稿箱").padding(.bottom, 6)
@@ -267,8 +361,13 @@ struct PublishSettingsView: View {
             .card()
 
             VStack(alignment: .leading, spacing: 0) {
-                SectionTitle(text: "其他平台").padding(.bottom, 6)
-                SettingRow(label: "自动出头条号、百家号版本", hint: "改标题、开头和标签，去掉公众号引导语。到稿件里一键复制，再到对应后台粘贴发布。") {
+                SectionTitle(text: "我的平台", hint: "勾上的平台会自动出对应版本，雷达和日历也按这个显示").padding(.bottom, 6)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
+                    ForEach(Platform.allCases) { p in platformToggle(p) }
+                }
+                .padding(.bottom, 10)
+                Divider()
+                SettingRow(label: "写完自动出各平台版本", hint: "头条/百家/知乎改标题、开头和标签；小红书、微博整篇重写成短内容。都去掉公众号引导语。") {
                     Toggle("", isOn: au(\.variants)).toggleStyle(.switch).labelsHidden()
                 }
             }
@@ -278,6 +377,24 @@ struct PublishSettingsView: View {
             secret = Keychain.get(Wechat.secretKey) ?? ""
             ip = await Wechat.publicIP() ?? "获取失败"
         }
+    }
+
+    func platformToggle(_ p: Platform) -> some View {
+        let on = store.data.auto.platforms.contains(p.rawValue)
+        return Button {
+            if on { store.data.auto.platforms.removeAll { $0 == p.rawValue } } else { store.data.auto.platforms.append(p.rawValue) }
+            store.save()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                Text(p.name)
+            }
+            .font(.system(size: 12, weight: on ? .semibold : .regular))
+            .frame(maxWidth: .infinity).padding(.vertical, 7)
+            .foregroundStyle(on ? p.color : Theme.sub)
+            .background(on ? p.color.opacity(0.1) : Theme.bg, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(RowButton())
     }
 
     func saveSecret() {
