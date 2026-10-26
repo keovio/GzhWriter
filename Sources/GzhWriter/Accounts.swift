@@ -82,7 +82,7 @@ struct AccountsView: View {
                     .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                     .frame(width: 28, height: 28)
                     .background(Platform.of(acc.platform)?.color ?? Theme.navy, in: Circle())
-                TextField("账号名", text: bind(acc.id, \.name)).fieldBox().frame(width: 200)
+                TextField("平台上的昵称", text: bind(acc.id, \.name)).fieldBox().frame(width: 200)
                 HStack(spacing: 6) {
                     Text("风格").font(.system(size: 12)).foregroundStyle(Theme.sub).fixedSize()
                     Picker("", selection: bind(acc.id, \.styleId)) {
@@ -129,7 +129,7 @@ struct AccountsView: View {
     func add(_ p: Platform) {
         let style = store.data.styles.first
         let same = store.accounts(on: p.rawValue).count
-        let acc = Account(platform: p.rawValue, name: same == 0 ? (style?.name ?? p.name) : "\(p.name)\(same + 1)", styleId: style?.id)
+        let acc = Account(platform: p.rawValue, name: Account.defaultName(p.rawValue, index: same + 1), styleId: style?.id)
         store.data.accounts.append(acc)
         store.save()
     }
