@@ -133,13 +133,14 @@ struct Article: Identifiable, Codable, Hashable {
     var failed = ""             // 自动流程停在哪一步出错（空=没出错），可以从断点继续
     var accountId: UUID?        // 写给哪个账号
     var posts: [String: Date] = [:]   // 哪些账号发过了：账号 ID → 时间
+    var drafts: [String: Date] = [:]  // 存进了哪些账号的草稿箱：账号 ID → 时间
     var primary = "wechat"      // 主平台：wechat=公众号长文；xiaohongshu/weibo=直接写的短内容，正文在 variants[primary]
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, accountId, posts, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, accountId, posts, drafts, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -177,6 +178,7 @@ struct Article: Identifiable, Codable, Hashable {
         primary = (try? c.decode(String.self, forKey: .primary)) ?? "wechat"
         accountId = try? c.decodeIfPresent(UUID.self, forKey: .accountId)
         posts = (try? c.decode([String: Date].self, forKey: .posts)) ?? [:]
+        drafts = (try? c.decode([String: Date].self, forKey: .drafts)) ?? [:]
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
@@ -570,4 +572,11 @@ struct Account: Identifiable, Codable, Hashable {
     var appId = ""              // 只有公众号用：草稿箱接口
 
     var secretKey: String { "wechat.appsecret." + id.uuidString }
+
+    /// 新号的默认名字：「我的头条号」「我的头条号 2」。登录后会换成平台上的昵称
+    static func defaultName(_ platform: String, index: Int) -> String {
+        let base = "我的" + (Platform.of(platform)?.name ?? "账号")
+        return index <= 1 ? base : "\(base) \(index)"
+    }
+    var isDefaultName: Bool { name.isEmpty || name.hasPrefix("我的" + (Platform.of(platform)?.name ?? "账号")) }
 }
