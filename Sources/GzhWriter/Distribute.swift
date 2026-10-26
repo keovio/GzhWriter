@@ -7,7 +7,7 @@ struct DistributeCard: View {
     let articleId: UUID
     var only: Platform? = nil          // 直接写的小红书/微博：只显示这一个平台
     @StateObject private var busy = Busy()
-    @State private var platform = "toutiao"
+    @State private var platform = ""
     @State private var copiedKey = ""
 
     var a: Article { store.article(articleId) ?? Article() }
@@ -71,7 +71,7 @@ struct DistributeCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 if only == nil {
                 HStack(spacing: 6) {
-                    ForEach(Platform.others(store)) { p in platformChip(p) }
+                    ForEach(tabs) { p in platformChip(p) }
                     Spacer()
                     if !Platform.others(store).isEmpty {
                         Button(a.variants.isEmpty ? "一键生成全部平台版本" : "全部重新生成") { runVariants([]) }
@@ -116,9 +116,18 @@ struct DistributeCard: View {
 
     var current: Platform? {
         if let only { return only }
-        let list = Platform.others(store)
+        let list = tabs
         if let p = Platform.of(platform), list.contains(p) { return p }
         return list.first
+    }
+
+    /// 这篇的主平台排第一，再加上设置里开着的平台
+    var tabs: [Platform] {
+        var list = Platform.others(store)
+        if let main = store.article(articleId)?.primary, main != "wechat", let p = Platform.of(main) {
+            list.removeAll { $0 == p }; list.insert(p, at: 0)
+        }
+        return list
     }
 
     func platformChip(_ p: Platform) -> some View {
