@@ -149,7 +149,17 @@ struct ModelsView: View {
                 if let id = selected, store.data.connections.contains(where: { $0.id == id }) {
                     ConnectionEditor(connId: id, onDelete: { selected = store.data.connections.first?.id }).id(id)
                 }
-                RolesEditor()
+                if store.data.connections.count > 1 {
+                    RolesEditor()
+                } else if let c = store.data.connections.first {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.green)
+                        Text("选题、写正文、审稿都用「\(c.name)」（\(c.model)）").font(.system(size: 13)).foregroundStyle(Theme.ink)
+                        Spacer()
+                        Text("再接一个模型，就能分开用、出错自动换").font(.system(size: 12)).foregroundStyle(Theme.faint)
+                    }
+                    .card(padding: 16)
+                }
             }
         }
         .onAppear { if selected == nil { selected = store.data.connections.first?.id } }
@@ -274,6 +284,7 @@ struct RolesEditor: View {
                                 HStack(spacing: 4) {
                                     Text("\(i + 1)").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.blue)
                                     Text(c.name).font(.system(size: 12))
+                                    Text(c.model).font(.system(size: 11)).foregroundStyle(Theme.sub)
                                     if i > 0 {
                                         Button { move(role, i, -1) } label: { Image(systemName: "arrow.left").font(.system(size: 9)) }
                                             .buttonStyle(RowButton())
