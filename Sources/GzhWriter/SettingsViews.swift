@@ -8,11 +8,11 @@ struct StylesView: View {
 
     var body: some View {
         Page(maxWidth: 900) {
-            PageHeader(title: "账号设定", subtitle: "每个公众号一套设定。自动选题和写作都照这里来，填得越具体越像你。") {
+            PageHeader(title: "风格", subtitle: "一个领域一套：赛道、读者、范文。同领域的几个号共用一套，在「账号」里选。") {
                 Button {
-                    let s = StylePreset(name: "新账号")
+                    let s = StylePreset(name: "新风格")
                     store.data.styles.append(s); store.save(); selected = s.id
-                } label: { Label("添加账号", systemImage: "plus") }
+                } label: { Label("添加风格", systemImage: "plus") }
                 .buttonStyle(GhostButton())
             }
 
@@ -37,7 +37,7 @@ struct StylesView: View {
                 let b = Binding(get: { store.data.styles[i] }, set: { store.data.styles[i] = $0; store.save() })
                 VStack(alignment: .leading, spacing: 0) {
                     SectionTitle(text: "基本信息").padding(.bottom, 6)
-                    SettingRow(label: "账号名称") { TextField("", text: b.name).fieldBox().frame(width: 360) }
+                    SettingRow(label: "风格名称") { TextField("", text: b.name).fieldBox().frame(width: 360) }
                     Divider()
                     SettingRow(label: "赛道", hint: "写什么领域") {
                         TextField("比如：公考备考经验", text: b.track).fieldBox().frame(width: 360)
@@ -74,7 +74,7 @@ struct StylesView: View {
                         Text("\(store.data.styles[i].sample.count) 字").font(.system(size: 11)).foregroundStyle(Theme.faint)
                         Spacer()
                         if store.data.styles.count > 1 {
-                            Button("删除这个账号") {
+                            Button("删除这套风格") {
                                 let id = store.data.styles[i].id
                                 store.data.styles.removeAll { $0.id == id }; store.save()
                                 selected = store.data.styles.first?.id
