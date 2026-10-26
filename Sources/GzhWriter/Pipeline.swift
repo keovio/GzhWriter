@@ -70,7 +70,7 @@ final class Pipeline: ObservableObject {
     @Published var hot: [HotItem] = []
     @Published var hotLoadedAt: Date?
     @Published var lastError: String?
-    private var queue: [(String, UUID?, UUID?, UUID?)] = []   // 方向、账号、参考拆解、要续写的稿件
+    private var queue: [(String, UUID?, UUID?, UUID?, String)] = []   // 方向、账号、参考拆解、要续写的稿件
     private var working = false
     private var timer: Timer?
 
@@ -95,8 +95,8 @@ final class Pipeline: ObservableObject {
     }
 
     /// 排入队列，按顺序一篇一篇写
-    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil) {
-        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId, nil)) }
+    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil, platform: String = "wechat") {
+        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId, nil, platform)) }
         if !working { Task { await drain() } }
     }
 
@@ -105,7 +105,7 @@ final class Pipeline: ObservableObject {
         guard running[id] == nil, !queue.contains(where: { $0.3 == id }), let a = store.article(id) else { return }
         store.update(id) { $0.failed = "" }
         running[id] = "排队中，等前面的写完"
-        queue.append((a.topic, a.styleId, a.refId, id))
+        queue.append((a.topic, a.styleId, a.refId, id, a.primary))
         if !working { Task { await drain() } }
     }
 
@@ -115,9 +115,9 @@ final class Pipeline: ObservableObject {
     private func drain() async {
         working = true
         while !queue.isEmpty {
-            let (dir, sid, ref, rid) = queue.removeFirst()
+            let (dir, sid, ref, rid, plat) = queue.removeFirst()
             if let rid { await work(rid, direction: dir, styleId: sid, refId: ref, resumed: true) }
-            else { await produce(direction: dir, styleId: sid, refId: ref) }
+            else { await produce(direction: dir, styleId: sid, refId: ref, platform: plat) }
         }
         working = false
     }
@@ -154,11 +154,11 @@ final class Pipeline: ObservableObject {
     }
 
     @discardableResult
-    func produce(direction: String, styleId: UUID?, refId: UUID? = nil) async -> UUID {
+    func produce(direction: String, styleId: UUID?, refId: UUID? = nil, platform: String = "wechat") async -> UUID {
         let style = store.style(styleId)
         let ref = store.breakdown(refId)
         let id = store.newArticle(topic: direction)
-        store.update(id) { $0.auto = true; $0.styleId = style?.id; $0.refId = ref?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
+        store.update(id) { $0.auto = true; $0.primary = platform; $0.styleId = style?.id; $0.refId = ref?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
         await work(id, direction: direction, styleId: styleId, refId: refId, resumed: false)
         return id
     }
@@ -241,6 +241,22 @@ final class Pipeline: ObservableObject {
             }
             log(id, "选题：\(t.topic)")
           }
+
+            // 直接写小红书 / 微博：不写长文，选完题就出短内容
+            if let cur = store.article(id), cur.isShort, let p = Platform.of(cur.primary) {
+                if cur.variants[p.rawValue] == nil || cur.variants[p.rawValue]!.body.isEmpty {
+                    log(id, "写\(p.name)")
+                    try await Publisher.makeShort(store, id, p, style: style)
+                }
+                store.update(id) { $0.stage = .layout }
+                if let v = store.article(id)?.variants[p.rawValue] {
+                    let hits = Compliance.scanText(v.title + "\n" + v.body)
+                    if !hits.isEmpty { log(id, "可能不合规的词：" + hits.map(\.word).joined(separator: "、")) }
+                }
+                log(id, "完成，等你过目")
+                notify("\(p.name)写好了", store.article(id)?.displayTitle ?? "")
+                return
+            }
 
             // 素材库：挑相关的真实素材
             var mats: [Material] = []
