@@ -52,6 +52,7 @@ struct StylesView: View {
     @State private var note = ""
     @State private var editingGuide = false
     @State private var showSample = false
+    @State private var confirmDelete = false
 
     var body: some View {
         Page(maxWidth: 900) {
@@ -65,8 +66,14 @@ struct StylesView: View {
 
             chips
 
-            if let i = store.data.styles.firstIndex(where: { $0.id == selected }) {
-                let b = Binding(get: { store.data.styles[i] }, set: { store.data.styles[i] = $0; store.save() })
+            if let id = selected, let cur = store.data.styles.first(where: { $0.id == id }) {
+                // 按 id 取，不按下标：删除后旧下标会越界闪退
+                let b = Binding(
+                    get: { store.data.styles.first(where: { $0.id == id }) ?? cur },
+                    set: { v in
+                        guard let i = store.data.styles.firstIndex(where: { $0.id == id }) else { return }
+                        store.data.styles[i] = v; store.save()
+                    })
                 positioning(b)
                 samples(b)
                 guideCard(b)
@@ -75,6 +82,25 @@ struct StylesView: View {
         }
         .onAppear { if selected == nil { selected = store.data.styles.first?.id } }
         .onChange(of: selected) { _ in note = ""; editingGuide = false; link = "" }
+        .confirmationDialog("删除风格「\(selectedName)」？", isPresented: $confirmDelete) {
+            Button("删除", role: .destructive) { deleteSelected() }
+        } message: {
+            Text("用这套风格的账号和稿件会改用「\(fallbackName)」。")
+        }
+    }
+
+    var selectedName: String { store.data.styles.first { $0.id == selected }?.name ?? "" }
+    var fallbackName: String { store.data.styles.first { $0.id != selected }?.name ?? "" }
+
+    func deleteSelected() {
+        guard let id = selected, store.data.styles.count > 1 else { return }
+        let next = store.data.styles.first { $0.id != id }?.id
+        selected = next          // 先切走，再删
+        store.data.styles.removeAll { $0.id == id }
+        for i in store.data.accounts.indices where store.data.accounts[i].styleId == id { store.data.accounts[i].styleId = next }
+        for i in store.data.articles.indices where store.data.articles[i].styleId == id { store.data.articles[i].styleId = next }
+        if store.data.auto.dailyStyleId == id { store.data.auto.dailyStyleId = next }
+        store.save()
     }
 
     // 顶部风格切换
@@ -96,6 +122,17 @@ struct StylesView: View {
                     .overlay(Capsule().stroke(selected == s.id ? Theme.blue.opacity(0.3) : Theme.rule))
                 }
                 .buttonStyle(RowButton())
+                .contextMenu {
+                    if store.data.styles.count > 1 {
+                        Button("删除", role: .destructive) { selected = s.id; confirmDelete = true }
+                    }
+                }
+            }
+            Spacer()
+            if store.data.styles.count > 1 {
+                Button { confirmDelete = true } label: { Label("删除这套", systemImage: "trash") }
+                    .buttonStyle(LinkButton(color: Theme.red))
+                    .help("删除当前选中的风格")
             }
         }
     }
@@ -235,17 +272,6 @@ struct StylesView: View {
                 GridRow {
                     field("作者名", "比如：小 K", b.author)
                     field("文末一句话", "比如：我是小 K，陪你上岸。", b.signature)
-                }
-            }
-            if store.data.styles.count > 1 {
-                HStack {
-                    Spacer()
-                    Button("删除这套风格") {
-                        let id = b.wrappedValue.id
-                        store.data.styles.removeAll { $0.id == id }; store.save()
-                        selected = store.data.styles.first?.id
-                    }
-                    .buttonStyle(LinkButton(color: Theme.red))
                 }
             }
         }
