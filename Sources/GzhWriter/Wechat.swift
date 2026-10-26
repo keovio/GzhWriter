@@ -9,7 +9,7 @@ enum WechatError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notConfigured:
-            return "还没填公众号的 AppID 和 AppSecret（在「发布与分发」里）。"
+            return "还没填公众号的 AppID 和 AppSecret（在「我的账号」里）。"
         case .api(let code, let msg):
             switch code {
             case 40164, 61004:
@@ -41,24 +41,30 @@ extension WechatError {
 @MainActor
 final class Wechat {
     static let shared = Wechat()
-    private var token = ""
-    private var expires = Date.distantPast
+    private var tokens: [String: (String, Date)] = [:]
 
     static let secretKey = "wechat.appsecret"
 
+    /// 每个公众号的 AppSecret 单独存，按 AppID 找
+    static func secret(appId: String, store: Store? = nil) -> String {
+        let accs = (store ?? Store.shared)?.data.accounts ?? []
+        if let a = accs.first(where: { $0.platform == "wechat" && $0.appId == appId }),
+           let s = Keychain.get(a.secretKey), !s.isEmpty { return s }
+        return Keychain.get(secretKey) ?? ""
+    }
+
     func accessToken(appId: String) async throws -> String {
-        if !token.isEmpty, Date() < expires { return token }
-        let secret = Keychain.get(Self.secretKey) ?? ""
+        if let (t, exp) = tokens[appId], Date() < exp { return t }
+        let secret = Self.secret(appId: appId)
         guard !appId.isEmpty, !secret.isEmpty else { throw WechatError.notConfigured }
         let obj = try await post("https://api.weixin.qq.com/cgi-bin/stable_token",
                                  json: ["grant_type": "client_credential", "appid": appId, "secret": secret])
         guard let t = obj["access_token"] as? String else { throw WechatError.api(-1, "没拿到 access_token") }
-        token = t
-        expires = Date().addingTimeInterval(Double((obj["expires_in"] as? Int) ?? 7200) - 300)
+        tokens[appId] = (t, Date().addingTimeInterval(Double((obj["expires_in"] as? Int) ?? 7200) - 300))
         return t
     }
 
-    func reset() { token = ""; expires = .distantPast }
+    func reset() { tokens = [:] }
 
     /// 本机公网 IP，方便用户加白名单
     /// 查本机出口 IP。先用国内服务：开着代理时，访问微信一般走直连，国外查到的是代理的 IP，不准。
