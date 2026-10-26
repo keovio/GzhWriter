@@ -63,6 +63,30 @@ final class Store: ObservableObject {
         save()
     }
 
+    /// 某个号发没发。只有一个号的平台沿用老的「我发了」
+    func isPosted(_ a: Article, _ acc: Account) -> Bool {
+        if a.posts[acc.id.uuidString] != nil { return true }
+        return accounts(on: acc.platform).count == 1 && (a.variants[acc.platform]?.posted ?? false)
+    }
+
+    /// 切换「我发了」：acc 为空时按平台记
+    func togglePosted(_ id: UUID, _ platform: String, _ acc: Account?) {
+        update(id) { a in
+            if let acc {
+                let wasOn = a.posts[acc.id.uuidString] != nil
+                    || (self.accounts(on: platform).count == 1 && (a.variants[platform]?.posted ?? false))
+                a.posts[acc.id.uuidString] = wasOn ? nil : Date()
+                let any = self.accounts(on: platform).contains { a.posts[$0.id.uuidString] != nil }
+                a.variants[platform, default: PlatformVariant()].posted = any
+                a.variants[platform, default: PlatformVariant()].postedAt = any ? Date() : nil
+            } else {
+                let now = !(a.variants[platform]?.posted ?? false)
+                a.variants[platform, default: PlatformVariant()].posted = now
+                a.variants[platform, default: PlatformVariant()].postedAt = now ? Date() : nil
+            }
+        }
+    }
+
     func account(_ id: UUID?) -> Account? {
         guard let id else { return nil }
         return data.accounts.first { $0.id == id }
