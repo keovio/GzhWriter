@@ -521,6 +521,7 @@ struct RunLog: View {
                 if step != nil {
                     ProgressView().controlSize(.small)
                     Text("正在写：\(step!)").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.blue)
+                    if let m = store.calling { ModelTag(text: m) }
                 } else if !failed.isEmpty {
                     Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(Theme.orange)
                     Text("停下了").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.orange)
