@@ -26,7 +26,7 @@ final class Store: ObservableObject {
         guard let d = try? Data(contentsOf: Self.file) else { return }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        if let v = try? dec.decode(AppData.self, from: d) { data = v }
+        if let v = try? dec.decode(AppData.self, from: d) { data = v; data.hot.removeAll { $0.platform == "douyin" } }
     }
 
     /// 改动后 0.5 秒落盘（合并连续输入）；写之前留一份 .bak
