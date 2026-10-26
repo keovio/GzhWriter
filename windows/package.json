@@ -18,7 +18,6 @@
   "build": {
     "appId": "com.keovi.gzhwriter",
     "productName": "公众号写稿助手",
-    "artifactName": "GzhWriter-${version}-${arch}-${target}.${ext}",
     "files": [
       "main.js",
       "preload.js",
@@ -33,7 +32,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "公众号写稿助手"
+      "shortcutName": "公众号写稿助手",
+      "artifactName": "GzhWriter-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "GzhWriter-Portable-${version}.${ext}"
     }
   }
 }
