@@ -1,11 +1,63 @@
 import Foundation
 import Security
 
-/// API Key 存在 macOS 钥匙串（登录钥匙串），不写进数据文件
+/// 密钥存放：~/Library/Application Support/GzhWriter/secrets.json（权限 600，只有本机当前用户能读）。
+/// 以前存在钥匙串里，但 app 没有开发者签名，每次更新都会弹授权；第一次读到旧钥匙串项时搬过来并删掉。
 enum Keychain {
     static let service = "com.keovi.GzhWriter.apikey"
+    private static let lock = NSLock()
+    private static var cache: [String: String]?
+
+    private static var file: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("GzhWriter", isDirectory: true).appendingPathComponent("secrets.json")
+    }
+
+    private static func loadLocked() -> [String: String] {
+        if let c = cache { return c }
+        var d: [String: String] = [:]
+        if let data = try? Data(contentsOf: file),
+           let v = try? JSONDecoder().decode([String: String].self, from: data) { d = v }
+        cache = d
+        return d
+    }
+
+    private static func writeLocked(_ d: [String: String]) {
+        cache = d
+        let fm = FileManager.default
+        try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        guard let data = try? JSONEncoder().encode(d) else { return }
+        try? data.write(to: file, options: .atomic)
+        try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
 
     static func get(_ account: String) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        var d = loadLocked()
+        if let v = d[account] { return v.isEmpty ? nil : v }
+        // 旧版本存在钥匙串里：读一次，搬到文件，删掉钥匙串项
+        let migratedKey = "_migrated." + account
+        if d[migratedKey] == nil {
+            d[migratedKey] = "1"
+            if let old = legacyGet(account), !old.isEmpty {
+                d[account] = old
+                legacyDelete(account)
+            }
+            writeLocked(d)
+            return d[account]
+        }
+        return nil
+    }
+
+    static func set(_ value: String, for account: String) {
+        lock.lock(); defer { lock.unlock() }
+        var d = loadLocked()
+        d[account] = value
+        d["_migrated." + account] = "1"
+        writeLocked(d)
+    }
+
+    private static func legacyGet(_ account: String) -> String? {
         let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -19,17 +71,13 @@ enum Keychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func set(_ value: String, for account: String) {
-        let base: [String: Any] = [
+    private static func legacyDelete(_ account: String) {
+        let q: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(base as CFDictionary)
-        guard !value.isEmpty else { return }
-        var add = base
-        add[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(add as CFDictionary, nil)
+        SecItemDelete(q as CFDictionary)
     }
 }
 
@@ -44,6 +92,7 @@ enum LLMError: LocalizedError {
     case noConnection
     case noKey(String)
     case badURL(String)
+    case readFail(String)
     case http(Int, String)
     case empty
     case badJSON(String)
@@ -54,6 +103,7 @@ enum LLMError: LocalizedError {
         case .noConnection: return "还没有可用的模型。先到「模型设置」添加一个，并给这个步骤选上。"
         case .noKey(let n): return "「\(n)」还没填 API Key。"
         case .badURL(let u): return "接口地址不对：\(u)"
+        case .readFail(let m): return m
         case .http(let code, let body): return "接口返回 \(code)：\(body.prefix(300))"
         case .empty: return "模型没有返回内容。"
         case .badJSON(let raw): return "模型返回的格式没法解析，可以再试一次。\n\(raw.prefix(200))"
@@ -139,6 +189,15 @@ enum PageReader {
     static func read(_ urlString: String) async throws -> (title: String, text: String) {
         guard let url = URL(string: urlString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw LLMError.badURL(urlString)
+        }
+        // 公众号文章直接请求会被重定向到验证页，用内置浏览器读
+        if url.host?.contains("mp.weixin.qq.com") == true {
+            if let p = await WebReader.shared.read(url.absoluteString, timeout: 15, interactive: true) {
+                var t = p.text
+                if t.count > 6000 { t = String(t.prefix(6000)) + "…" }
+                return (p.title, t)
+            }
+            throw LLMError.readFail("公众号文章没读到（可能需要验证），先点「打开原文」看一眼再试")
         }
         var req = URLRequest(url: url)
         req.timeoutInterval = 30
