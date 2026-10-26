@@ -278,6 +278,7 @@ enum Publisher {
         let mid = try await api.addDraft(title: a.displayTitle, author: style?.author ?? "", digest: digest, html: html,
                                          thumbId: thumb, openComment: w.openComment, appId: appId)
         store.update(id) { $0.wechatDraft = mid }
+        store.markDrafted(id, acc)
         log("已推到「\(acc.name)」草稿箱，去手机上看一眼再发")
     }
 }
