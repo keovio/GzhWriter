@@ -244,9 +244,11 @@ enum Publisher {
     // MARK: 公众号草稿箱
 
     static func pushDraft(_ store: Store, _ id: UUID, log: (String) -> Void) async throws {
-        let w = store.data.wechat
-        guard !w.appId.isEmpty, !(Keychain.get(Wechat.secretKey) ?? "").isEmpty else { throw WechatError.notConfigured }
         guard let a = store.article(id) else { return }
+        let w = store.data.wechat
+        guard let acc = store.wechatAccount(for: a), !Wechat.secret(appId: acc.appId, store: store).isEmpty
+        else { throw WechatError.notConfigured }
+        let appId = acc.appId
         let style = store.style(a.styleId)
         let api = Wechat.shared
 
@@ -260,22 +262,22 @@ enum Publisher {
         }
         guard let cd = coverData else { throw WechatError.api(-1, "封面生成失败") }
         log("上传封面")
-        let thumb = try await api.uploadCover(cd, appId: w.appId)
+        let thumb = try await api.uploadCover(cd, appId: appId)
 
         // 正文图片
         var urls: [String: String] = [:]
         for sec in a.sections where !sec.image.isEmpty {
             guard let u = ImageStore.url(id, sec.image), let d = try? Data(contentsOf: u) else { continue }
             log("上传正文图片")
-            urls[sec.image] = try await api.uploadBodyImage(d, appId: w.appId)
+            urls[sec.image] = try await api.uploadBodyImage(d, appId: appId)
         }
 
         let html = Layout.html(a, signature: style?.signature ?? "", img: { urls[$0] })
         let digest = a.digest.isEmpty ? String(a.plainText.replacingOccurrences(of: "\n", with: " ").prefix(54)) : a.digest
         log("新建草稿")
         let mid = try await api.addDraft(title: a.displayTitle, author: style?.author ?? "", digest: digest, html: html,
-                                         thumbId: thumb, openComment: w.openComment, appId: w.appId)
+                                         thumbId: thumb, openComment: w.openComment, appId: appId)
         store.update(id) { $0.wechatDraft = mid }
-        log("已推到公众号草稿箱，去手机上看一眼再发")
+        log("已推到「\(acc.name)」草稿箱，去手机上看一眼再发")
     }
 }
