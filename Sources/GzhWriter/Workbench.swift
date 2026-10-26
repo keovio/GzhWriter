@@ -88,9 +88,9 @@ struct WorkbenchView: View {
     var composer: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 6) {
-                SectionTitle(text: "写一篇", hint: "留空就按赛道和今日热榜自动选题")
+                SectionTitle(text: "写一篇", hint: "留空自动选题")
                 Spacer()
-                ForEach([("wechat", "公众号长文"), ("xiaohongshu", "小红书笔记"), ("weibo", "微博")], id: \.0) { key, name in
+                ForEach([("wechat", "公众号"), ("toutiao", "头条号"), ("baijiahao", "百家号"), ("zhihu", "知乎"), ("xiaohongshu", "小红书"), ("weibo", "微博")], id: \.0) { key, name in
                     Button { target = key } label: {
                         Text(name).font(.system(size: 12, weight: target == key ? .semibold : .regular))
                             .padding(.horizontal, 12).padding(.vertical, 5)
@@ -139,8 +139,8 @@ struct WorkbenchView: View {
                         .labelsHidden().frame(width: 150)
                     }
                 }
-                Text(target == "wechat" ? "约 \(store.data.auto.targetWords) 字 · 不到 \(store.data.auto.passScore) 分自动返修，写完自动出其他平台版本"
-                     : (target == "weibo" ? "140–300 字短帖，直接写，不写长文" : "300–600 字笔记，直接写，不写长文"))
+                Text(targetHint)
+                    .lineLimit(2).frame(maxWidth: 260, alignment: .leading)
                     .font(.system(size: 12)).foregroundStyle(Theme.faint)
                 Spacer()
                 Button(action: go) {
@@ -153,9 +153,19 @@ struct WorkbenchView: View {
         .card()
     }
 
+    var targetHint: String {
+        switch target {
+        case "xiaohongshu": return "300–600 字笔记，直接写"
+        case "weibo": return "140–300 字短帖，直接写"
+        case "wechat": return "约 \(store.data.auto.targetWords) 字长文，写完顺带出其他平台版"
+        default: return "约 \(store.data.auto.targetWords) 字长文，按\(Platform.of(target)?.name ?? "")的规则出标题和标签"
+        }
+    }
+
     func labeled<C: View>(_ t: String, @ViewBuilder _ c: () -> C) -> some View {
         HStack(spacing: 8) {
             Text(t).font(.system(size: 12)).foregroundStyle(Theme.sub)
+                .lineLimit(1).fixedSize()
             c()
         }
     }
