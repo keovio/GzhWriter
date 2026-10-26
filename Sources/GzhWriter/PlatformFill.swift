@@ -12,13 +12,22 @@ enum PlatformFill {
         (Platform.of(platform) ?? .toutiao).publishURL
     }
 
-    static func open(store: Store, articleId: UUID, platform: String) {
+    /// 每个账号单独的登录状态。每个平台的第一个号沿用原来的登录（老版本登过的不用重登）。
+    static func dataStore(_ acc: Account?) -> WKWebsiteDataStore {
+        guard let acc, let store = Store.shared else { return .default() }
+        if store.accounts(on: acc.platform).first?.id == acc.id { return .default() }
+        if #available(macOS 14.0, *) { return WKWebsiteDataStore(forIdentifier: acc.id) }
+        return .default()
+    }
+
+    static func open(store: Store, articleId: UUID, platform: String, account: Account? = nil) {
         guard let a = store.article(articleId), let v = a.variants[platform] else { return }
         let model = FillModel(article: a, variant: v, platform: platform)
+        model.dataStore = dataStore(account)
         let host = NSHostingView(rootView: FillView(model: model))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = (Platform.of(platform)?.name ?? platform) + " · " + (v.title.isEmpty ? a.displayTitle : v.title)
+        w.title = (account.map { "\(Platform.of(platform)?.name ?? platform)「\($0.name)」" } ?? (Platform.of(platform)?.name ?? platform)) + " · " + (v.title.isEmpty ? a.displayTitle : v.title)
         w.contentView = host
         w.isReleasedWhenClosed = false
         w.center()
@@ -30,13 +39,16 @@ enum PlatformFill {
     }
 
     /// 只打开平台去登录（登录状态会记住，之后填稿不用再登）
-    static func login(_ p: Platform) {
-        let web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+    static func login(_ acc: Account) {
+        guard let p = Platform.of(acc.platform) else { return }
+        let cfg = WKWebViewConfiguration()
+        cfg.websiteDataStore = dataStore(acc)
+        let web = WKWebView(frame: .zero, configuration: cfg)
         web.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         web.load(URLRequest(url: p == .weibo ? URL(string: "https://weibo.com/login.php")! : p.publishURL))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = "登录\(p.name)（登录后直接关掉这个窗口就行）"
+        w.title = "登录\(p.name)「\(acc.name)」（登录后直接关掉这个窗口就行）"
         w.contentView = web
         w.isReleasedWhenClosed = false
         w.center()
@@ -151,6 +163,7 @@ final class FillModel: ObservableObject {
         platform == "xiaohongshu" ? "小红书要先上传图片才会出现标题和正文框：点「复制封面」粘进去，或上传你自己的图。" : ""
     }
     @Published var filled = false
+    var dataStore: WKWebsiteDataStore = .default()
     weak var web: WKWebView?
     private var tries = 0
     private var timer: Timer?
@@ -256,7 +269,7 @@ struct FillWeb: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = .default()
+        cfg.websiteDataStore = model.dataStore
         let v = WKWebView(frame: .zero, configuration: cfg)
         v.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         v.navigationDelegate = context.coordinator
