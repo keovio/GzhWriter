@@ -11,7 +11,9 @@ struct WorkbenchView: View {
     @State private var styleId: UUID?
     @State private var count = 1
     @State private var refId: UUID?
-    @State private var target = "wechat"
+    @State private var accountId: UUID?
+    var account: Account? { store.account(accountId) ?? store.data.accounts.first }
+    var target: String { account?.platform ?? "wechat" }
     @State private var showAllHot = false
 
     var greeting: String {
@@ -26,7 +28,7 @@ struct WorkbenchView: View {
     var body: some View {
         Page {
             PageHeader(title: greeting, subtitle: store.data.connections.isEmpty
-                       ? "先到「模型与分工」接一个模型，就能开始一键成稿。"
+                       ? "先到「设置 → 模型」接一个模型，就能开始一键成稿。"
                        : "看看今天写到哪了。") {
                 if pipeline.queued > 0 || !pipeline.running.isEmpty {
                     Chip(text: "后台在写 \(pipeline.running.count + pipeline.queued) 篇", fg: Theme.blue, bg: Theme.blueBg)
@@ -43,6 +45,7 @@ struct WorkbenchView: View {
         }
         .task {
             if styleId == nil { styleId = store.data.auto.dailyStyleId ?? store.data.styles.first?.id }
+            if accountId == nil { accountId = store.data.accounts.first { $0.styleId == styleId }?.id ?? store.data.accounts.first?.id }
             if pipeline.hot.isEmpty { await pipeline.refreshHot() }
         }
     }
@@ -90,14 +93,26 @@ struct WorkbenchView: View {
             HStack(spacing: 6) {
                 SectionTitle(text: "写一篇", hint: "留空自动选题")
                 Spacer()
-                ForEach([("wechat", "公众号"), ("toutiao", "头条号"), ("baijiahao", "百家号"), ("zhihu", "知乎"), ("xiaohongshu", "小红书"), ("weibo", "微博")], id: \.0) { key, name in
-                    Button { target = key } label: {
-                        Text(name).font(.system(size: 12, weight: target == key ? .semibold : .regular))
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .foregroundStyle(target == key ? Color.white : Theme.sub)
-                            .background(target == key ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.bg), in: Capsule())
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Text("发到").font(.system(size: 12)).foregroundStyle(Theme.sub).fixedSize()
+                    ForEach(store.data.accounts) { acc in
+                        let on = account?.id == acc.id
+                        let p = Platform.of(acc.platform)
+                        Button { accountId = acc.id } label: {
+                            HStack(spacing: 5) {
+                                Text(p?.name ?? "").font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(on ? Color.white.opacity(0.85) : (p?.color ?? Theme.sub))
+                                Text(acc.name).font(.system(size: 12, weight: on ? .semibold : .regular))
+                                    .foregroundStyle(on ? Color.white : Theme.ink)
+                            }
+                            .fixedSize()
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(on ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.bg), in: Capsule())
+                        }
+                        .buttonStyle(RowButton())
                     }
-                    .buttonStyle(RowButton())
                 }
             }
             TextField("想写什么？比如：在职备考公务员，每天两小时怎么安排", text: $direction, axis: .vertical)
@@ -108,12 +123,6 @@ struct WorkbenchView: View {
                 .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .onSubmit(go)
             HStack(spacing: 18) {
-                labeled("账号") {
-                    Picker("", selection: $styleId) {
-                        ForEach(store.data.styles) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                    .labelsHidden().frame(width: 150)
-                }
                 labeled("篇数") {
                     HStack(spacing: 0) {
                         ForEach([1, 3, 5], id: \.self) { n in
@@ -171,8 +180,8 @@ struct WorkbenchView: View {
     }
 
     func go() {
-        pipeline.enqueue(direction: direction.trimmingCharacters(in: .whitespacesAndNewlines), styleId: styleId, count: count,
-                         refId: target == "wechat" ? refId : nil, platform: target)
+        pipeline.enqueue(direction: direction.trimmingCharacters(in: .whitespacesAndNewlines), styleId: account?.styleId ?? styleId, count: count,
+                         refId: target == "wechat" ? refId : nil, platform: target, accountId: account?.id)
         direction = ""
     }
 
