@@ -258,7 +258,7 @@ final class Pipeline: ObservableObject {
                 catch { log(id, "配图出错：\(error.localizedDescription)") }
             }
             if settings.variants {
-                log(id, "生成头条号、百家号版本")
+                log(id, "生成各平台版本：" + Platform.others(store).map(\.name).joined(separator: "、"))
                 do { try await Publisher.makeVariants(store, id) }
                 catch { log(id, "平台版本出错：\(error.localizedDescription)") }
             }
