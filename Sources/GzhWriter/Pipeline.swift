@@ -210,6 +210,7 @@ final class Pipeline: ObservableObject {
         let style = store.style(styleId)
         let ref = store.breakdown(refId)
         if resumed { log(id, "从断点接着写") }
+        log(id, "模型：选题 \(store.modelLabel(.topic))；正文 \(store.modelLabel(.draft))；审稿 \(store.modelLabel(.review))")
         do {
           if store.article(id)?.sections.isEmpty ?? true,
              let cur = store.article(id), !resumed || cur.viewpoint.isEmpty {
