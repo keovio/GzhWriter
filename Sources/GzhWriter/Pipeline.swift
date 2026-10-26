@@ -348,7 +348,12 @@ final class Pipeline: ObservableObject {
                 do { try await Publisher.makeImages(store, id) { self.log(id, $0) } }
                 catch { log(id, "配图出错：\(error.localizedDescription)") }
             }
-            if settings.variants {
+            let main = store.article(id)?.primary ?? "wechat"
+            if main != "wechat", let p = Platform.of(main) {
+                log(id, "生成\(p.name)版本")
+                do { try await Publisher.makeVariants(store, id, only: [p]) }
+                catch { log(id, "\(p.name)版本出错：\(error.localizedDescription)") }
+            } else if settings.variants {
                 log(id, "生成各平台版本：" + Platform.others(store).map(\.name).joined(separator: "、"))
                 do { try await Publisher.makeVariants(store, id) }
                 catch { log(id, "平台版本出错：\(error.localizedDescription)") }
@@ -356,7 +361,7 @@ final class Pipeline: ObservableObject {
 
             // 7 推公众号草稿箱（只存草稿，不发表）
             var pushed = false
-            if store.data.wechat.autoPush, !store.data.wechat.appId.isEmpty {
+            if main == "wechat", store.data.wechat.autoPush, !store.data.wechat.appId.isEmpty {
                 do { try await Publisher.pushDraft(store, id) { self.log(id, $0) }; pushed = true }
                 catch { log(id, "推草稿箱失败：\(error.localizedDescription)") }
             }
