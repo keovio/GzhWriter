@@ -38,7 +38,8 @@ button, input, textarea, select { font-family: inherit; font-size: inherit; colo
 .ph p { margin: 6px 0 0; color: var(--sub); }
 .ph .sp { flex: 1; }
 .card { background: var(--sheet); border-radius: 14px; padding: 20px 22px; box-shadow: 0 1px 3px rgba(20, 30, 60, .06); margin-bottom: 18px; }
-.st { font-size: 16px; font-weight: 700; margin: 0 0 12px; display: flex; align-items: baseline; gap: 10px; }
+.st { font-size: 16px; font-weight: 700; margin: 0 0 12px; display: flex; align-items: baseline; gap: 10px; white-space: nowrap; }
+.st small { white-space: normal; }
 .st small { font-size: 12px; color: var(--faint); font-weight: 400; }
 .row { display: flex; align-items: center; gap: 10px; }
 .row.wrap { flex-wrap: wrap; }
@@ -103,7 +104,8 @@ select.field { padding: 7px 8px; }
 @keyframes sp { to { transform: rotate(360deg) } }
 
 /* 编辑器 */
-.ed { display: grid; grid-template-columns: 1fr 400px; gap: 20px; align-items: start; }
+.ed { display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: 20px; align-items: start; }
+@media (max-width: 1180px) { .ed { grid-template-columns: minmax(0, 1fr); } }
 .ed .sec { padding: 14px 0; border-top: 1px dashed var(--rule); }
 .ed .sec:first-child { border-top: 0; }
 .ed .sec input { font-weight: 700; font-size: 15px; width: 100%; border: 0; outline: none; padding: 4px 0; background: transparent; }
