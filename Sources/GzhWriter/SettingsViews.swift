@@ -267,7 +267,7 @@ struct RolesEditor: View {
             ForEach(Array(Role.allCases.enumerated()), id: \.element) { n, role in
                 if n > 0 { Divider() }
                 let ids = store.data.roles[role.rawValue] ?? []
-                SettingRow(label: role.title, hint: ids.isEmpty ? "没选就按连接顺序" : "") {
+                SettingRow(label: role.title, hint: "用于：" + role.uses + (ids.isEmpty ? "。没选就按连接顺序" : "")) {
                     HStack(spacing: 6) {
                         ForEach(Array(ids.enumerated()), id: \.element) { i, id in
                             if let c = store.data.connections.first(where: { $0.id == id }) {
