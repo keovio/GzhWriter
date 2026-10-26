@@ -61,7 +61,7 @@ struct DistributeCard: View {
                 Spacer()
                 Button(a.wechatDraft.isEmpty ? "推到草稿箱" : "再推一份") { push() }
                     .buttonStyle(PrimaryButton())
-                    .disabled(busy.label != nil || store.data.wechat.appId.isEmpty)
+                    .disabled(busy.label != nil || store.wechatAccount(for: a) == nil)
             }
             .padding(14)
             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
@@ -93,7 +93,7 @@ struct DistributeCard: View {
                         .padding(.vertical, 6)
                     }
                 } else {
-                    Text("到「发布与分发」里勾选你在做的平台。").font(.system(size: 12)).foregroundStyle(Theme.sub)
+                    Text("到「我的账号」里添加你在做的平台账号。").font(.system(size: 12)).foregroundStyle(Theme.sub)
                 }
             }
             .padding(14)
@@ -221,13 +221,26 @@ struct DistributeCard: View {
                 }
                 .buttonStyle(GhostButton())
                 if p.fillable {
-                    Button {
-                        PlatformFill.open(store: store, articleId: articleId, platform: p.rawValue)
-                    } label: {
-                        HStack(spacing: 4) { Image(systemName: "square.and.pencil"); Text("打开\(p.name)并自动填入") }
+                    let accs = store.accounts(on: p.rawValue)
+                    if accs.count > 1 {
+                        Menu {
+                            ForEach(accs) { acc in
+                                Button("填到「\(acc.name)」") { PlatformFill.open(store: store, articleId: articleId, platform: p.rawValue, account: acc) }
+                            }
+                        } label: {
+                            HStack(spacing: 4) { Image(systemName: "square.and.pencil"); Text("打开\(p.name)并自动填入") }
+                        }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .buttonStyle(PrimaryButton())
+                    } else {
+                        Button {
+                            PlatformFill.open(store: store, articleId: articleId, platform: p.rawValue, account: accs.first)
+                        } label: {
+                            HStack(spacing: 4) { Image(systemName: "square.and.pencil"); Text("打开\(p.name)并自动填入") }
+                        }
+                        .buttonStyle(PrimaryButton())
+                        .help("在 app 里打开发文页，自动填标题和正文；发布按钮你自己点")
                     }
-                    .buttonStyle(PrimaryButton())
-                    .help("在 app 里打开发文页，自动填标题和正文；发布按钮你自己点")
                 } else {
                     Button {
                         Publisher.copyText(Publisher.platformFull(a, v))
@@ -268,8 +281,8 @@ struct DistributeCard: View {
     }
 
     var wechatStatus: String {
-        if store.data.wechat.appId.isEmpty { return "先到「发布与分发」填 AppID 和 AppSecret" }
-        return a.wechatDraft.isEmpty ? "推过去只是存草稿，发表要你在后台或手机上点" : "已在草稿箱，去看一眼再发表"
+        guard let acc = store.wechatAccount(for: a) else { return "先到「我的账号」给公众号填 AppID 和 AppSecret" }
+        return a.wechatDraft.isEmpty ? "存进「\(acc.name)」草稿箱，发表要你在后台或手机上点" : "已在「\(acc.name)」草稿箱，去看一眼再发表"
     }
 
     // MARK: 动作
@@ -299,16 +312,11 @@ struct DistributeCard: View {
     }
 }
 
-// MARK: 发布与分发设置
+// MARK: 发布设置（账号相关的都在「我的账号」）
 
 struct PublishSettingsView: View {
     @EnvironmentObject var store: Store
-    @StateObject private var busy = Busy()
-    @State private var secret = ""
     @State private var ip = ""
-    @State private var testResult = ""
-    @State private var wechatOpen = false
-    var showWechat: Bool { wechatOpen || !store.data.wechat.appId.isEmpty }
 
     func w<T>(_ kp: WritableKeyPath<WechatSettings, T>) -> Binding<T> {
         Binding(get: { store.data.wechat[keyPath: kp] }, set: { store.data.wechat[keyPath: kp] = $0; store.save() })
@@ -319,63 +327,35 @@ struct PublishSettingsView: View {
 
     var body: some View {
         Page(maxWidth: 840) {
-            PageHeader(title: "平台与发布", subtitle: "勾上你在做的平台。每个平台都只帮你准备好，发布按钮你自己点。")
+            PageHeader(title: "发布", subtitle: "写完之后做什么。每个平台都只帮你准备好，发布按钮你自己点。")
 
             VStack(alignment: .leading, spacing: 0) {
-                SectionTitle(text: "我的平台", hint: "第一次用先点「登录」，登录一次会记住").padding(.bottom, 6)
-                ForEach(Array(Platform.allCases.enumerated()), id: \.element) { n, p in
-                    if n > 0 { Divider() }
-                    platformRow(p)
-                }
-                Divider()
-                SettingRow(label: "写完公众号长文后，顺带出勾上平台的版本", hint: "头条/百家/知乎改标题、开头和标签；小红书、微博重写成短内容") {
+                SectionTitle(text: "写完之后").padding(.bottom, 6)
+                SettingRow(label: "顺带出其他平台版本", hint: "写公众号长文时，给你其他账号的平台各出一版") {
                     Toggle("", isOn: au(\.variants)).toggleStyle(.switch).labelsHidden()
                 }
-            }
-            .card()
-
-            if showWechat {
-            VStack(alignment: .leading, spacing: 0) {
-                SectionTitle(text: "公众号草稿箱设置", hint: "填好后写完可以一键存进公众号草稿箱").padding(.bottom, 6)
-                SettingRow(label: "AppID", hint: "公众号后台「设置与开发 → 开发接口管理」") {
-                    TextField("wx…", text: w(\.appId)).fieldBox().frame(width: 340)
+                Divider()
+                SettingRow(label: "自动存进公众号草稿箱", hint: "只存草稿，不发表") {
+                    Toggle("", isOn: w(\.autoPush)).toggleStyle(.switch).labelsHidden()
                 }
                 Divider()
-                SettingRow(label: "AppSecret", hint: "同一页生成，存在钥匙串") {
-                    SecureField("", text: $secret).fieldBox().frame(width: 340)
-                        .onSubmit { saveSecret() }
+                SettingRow(label: "公众号文章开启留言") {
+                    Toggle("", isOn: w(\.openComment)).toggleStyle(.switch).labelsHidden()
                 }
                 Divider()
-                SettingRow(label: "IP 白名单", hint: "把本机公网 IP 加到同一页的白名单里，换网络后要重新加") {
+                SettingRow(label: "本机 IP", hint: "公众号后台「开发接口管理」的 IP 白名单要加这个，换网络后要重新加") {
                     HStack(spacing: 8) {
                         Text(ip.isEmpty ? "获取中…" : ip).font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.ink)
                         Button("复制") { Publisher.copyText(ip) }.buttonStyle(GhostButton()).disabled(ip.isEmpty)
                     }
                 }
-                Divider()
-                SettingRow(label: "写完自动推到草稿箱", hint: "一键成稿完成后自动推，只存草稿") {
-                    Toggle("", isOn: w(\.autoPush)).toggleStyle(.switch).labelsHidden()
-                }
-                Divider()
-                SettingRow(label: "开启留言") {
-                    Toggle("", isOn: w(\.openComment)).toggleStyle(.switch).labelsHidden()
-                }
-                HStack(spacing: 10) {
-                    Button("保存并测试") { saveSecret(); test() }.buttonStyle(PrimaryButton()).disabled(busy.label != nil)
-                    if !testResult.isEmpty { Text(testResult).font(.system(size: 12)).foregroundStyle(Theme.green) }
-                    Spacer()
-                }
-                .padding(.top, 12)
-                BusyBar(busy: busy).padding(.top, 4)
             }
             .card()
-
-            }
 
             VStack(alignment: .leading, spacing: 0) {
                 SectionTitle(text: "自动配图").padding(.bottom, 6)
                 SettingRow(label: "写完自动配图", hint: ImageGen.connection(store) == nil
-                           ? "画图用智谱 GLM-Image（0.1 元一张，没开通会自动换 CogView-4）。到「模型与分工」添加智谱并填 Key；没接时只生成文字封面。"
+                           ? "画图用智谱 GLM-Image（0.1 元一张，没开通会自动换 CogView-4）。到「设置 → 模型」添加智谱并填 Key；没接时只生成文字封面。"
                            : "已接智谱，封面加正文配图") {
                     Toggle("", isOn: au(\.images)).toggleStyle(.switch).labelsHidden()
                 }
@@ -398,68 +378,7 @@ struct PublishSettingsView: View {
                 }
             }
             .card()
-
         }
-        .task {
-            secret = Keychain.get(Wechat.secretKey) ?? ""
-            ip = await Wechat.publicIP() ?? "获取失败"
-        }
-    }
-
-    func platformRow(_ p: Platform) -> some View {
-        let on = store.data.auto.platforms.contains(p.rawValue) || p == .wechat
-        return HStack(spacing: 12) {
-            Button {
-                guard p != .wechat else { return }
-                if on { store.data.auto.platforms.removeAll { $0 == p.rawValue } } else { store.data.auto.platforms.append(p.rawValue) }
-                store.save()
-            } label: {
-                Image(systemName: on ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 17)).foregroundStyle(on ? p.color : Theme.faint)
-            }
-            .buttonStyle(RowButton())
-            PlatformTag(key: p.rawValue)
-            Text(p.howTo).font(.system(size: 12)).foregroundStyle(Theme.sub)
-            Spacer()
-            if p == .wechat {
-                Button(store.data.wechat.appId.isEmpty ? "设置草稿箱" : "已设置") { wechatOpen.toggle() }
-                    .buttonStyle(GhostButton())
-            } else {
-                Button("登录") { PlatformFill.login(p) }.buttonStyle(GhostButton())
-            }
-        }
-        .padding(.vertical, 10)
-    }
-
-    func platformToggle(_ p: Platform) -> some View {
-        let on = store.data.auto.platforms.contains(p.rawValue)
-        return Button {
-            if on { store.data.auto.platforms.removeAll { $0 == p.rawValue } } else { store.data.auto.platforms.append(p.rawValue) }
-            store.save()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: on ? "checkmark.circle.fill" : "circle")
-                Text(p.name)
-            }
-            .font(.system(size: 12, weight: on ? .semibold : .regular))
-            .frame(maxWidth: .infinity).padding(.vertical, 7)
-            .foregroundStyle(on ? p.color : Theme.sub)
-            .background(on ? p.color.opacity(0.1) : Theme.bg, in: RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(RowButton())
-    }
-
-    func saveSecret() {
-        Keychain.set(secret.trimmingCharacters(in: .whitespacesAndNewlines), for: Wechat.secretKey)
-        Wechat.shared.reset()
-    }
-
-    func test() {
-        let id = store.data.wechat.appId.trimmingCharacters(in: .whitespacesAndNewlines)
-        testResult = ""
-        busy.run("正在连接公众号…") {
-            try await Wechat.shared.test(appId: id)
-            testResult = "✓ 连上了，可以推草稿"
-        }
+        .task { ip = await Wechat.publicIP() ?? "获取失败" }
     }
 }
