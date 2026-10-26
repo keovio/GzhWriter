@@ -70,7 +70,7 @@ final class Pipeline: ObservableObject {
     @Published var hot: [HotItem] = []
     @Published var hotLoadedAt: Date?
     @Published var lastError: String?
-    private var queue: [(String, UUID?, UUID?, UUID?, String)] = []   // 方向、账号、参考拆解、要续写的稿件
+    private var queue: [(String, UUID?, UUID?, UUID?, String, UUID?)] = []   // 方向、账号、参考拆解、要续写的稿件
     private var working = false
     private var timer: Timer?
 
@@ -95,8 +95,8 @@ final class Pipeline: ObservableObject {
     }
 
     /// 排入队列，按顺序一篇一篇写
-    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil, platform: String = "wechat") {
-        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId, nil, platform)) }
+    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil, platform: String = "wechat", accountId: UUID? = nil) {
+        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId, nil, platform, accountId)) }
         if !working { Task { await drain() } }
     }
 
@@ -105,7 +105,7 @@ final class Pipeline: ObservableObject {
         guard running[id] == nil, !queue.contains(where: { $0.3 == id }), let a = store.article(id) else { return }
         store.update(id) { $0.failed = "" }
         running[id] = "排队中，等前面的写完"
-        queue.append((a.topic, a.styleId, a.refId, id, a.primary))
+        queue.append((a.topic, a.styleId, a.refId, id, a.primary, a.accountId))
         if !working { Task { await drain() } }
     }
 
@@ -115,9 +115,9 @@ final class Pipeline: ObservableObject {
     private func drain() async {
         working = true
         while !queue.isEmpty {
-            let (dir, sid, ref, rid, plat) = queue.removeFirst()
+            let (dir, sid, ref, rid, plat, acc) = queue.removeFirst()
             if let rid { await work(rid, direction: dir, styleId: sid, refId: ref, resumed: true) }
-            else { await produce(direction: dir, styleId: sid, refId: ref, platform: plat) }
+            else { await produce(direction: dir, styleId: sid, refId: ref, platform: plat, accountId: acc) }
         }
         working = false
     }
@@ -154,11 +154,11 @@ final class Pipeline: ObservableObject {
     }
 
     @discardableResult
-    func produce(direction: String, styleId: UUID?, refId: UUID? = nil, platform: String = "wechat") async -> UUID {
+    func produce(direction: String, styleId: UUID?, refId: UUID? = nil, platform: String = "wechat", accountId: UUID? = nil) async -> UUID {
         let style = store.style(styleId)
         let ref = store.breakdown(refId)
         let id = store.newArticle(topic: direction)
-        store.update(id) { $0.auto = true; $0.primary = platform; $0.styleId = style?.id; $0.refId = ref?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
+        store.update(id) { $0.auto = true; $0.primary = platform; $0.accountId = accountId; $0.styleId = style?.id; $0.refId = ref?.id; $0.topic = direction.isEmpty ? "自动选题中…" : direction }
         await work(id, direction: direction, styleId: styleId, refId: refId, resumed: false)
         return id
     }
@@ -362,7 +362,7 @@ final class Pipeline: ObservableObject {
 
             // 7 推公众号草稿箱（只存草稿，不发表）
             var pushed = false
-            if main == "wechat", store.data.wechat.autoPush, !store.data.wechat.appId.isEmpty {
+            if main == "wechat", store.data.wechat.autoPush, let art = store.article(id), store.wechatAccount(for: art) != nil {
                 do { try await Publisher.pushDraft(store, id) { self.log(id, $0) }; pushed = true }
                 catch { log(id, "推草稿箱失败：\(error.localizedDescription)") }
             }
