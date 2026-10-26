@@ -34,7 +34,7 @@ struct WorkbenchView: View {
             stats
             composer
             if !pipeline.running.isEmpty || pipeline.queued > 0 { runningCard }
-            if let e = pipeline.lastError { errorCard(e) }
+            if !pipeline.failedArticles.isEmpty { failedCard }
             HStack(alignment: .top, spacing: 20) {
                 recent.frame(maxWidth: .infinity)
                 hotCard.frame(width: 360)
@@ -172,19 +172,29 @@ struct WorkbenchView: View {
             }
             ForEach(Array(pipeline.running.keys), id: \.self) { id in
                 Button { open(id) } label: {
-                    HStack(spacing: 12) {
-                        ProgressView().controlSize(.small)
-                        Text(store.article(id)?.displayTitle ?? "新稿件").font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Theme.ink).lineLimit(1)
-                        Spacer()
-                        Text(pipeline.running[id] ?? "").font(.system(size: 12)).foregroundStyle(Theme.blue).lineLimit(1)
-                        Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(Theme.faint)
-                    }
-                    .padding(12)
-                    .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
-                    .contentShape(Rectangle())
+                    RunLog(articleId: id, compact: true).contentShape(Rectangle())
                 }
                 .buttonStyle(RowButton())
+            }
+        }
+        .card()
+    }
+
+    var failedCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                SectionTitle(text: "停下来的稿件", hint: "已写好的部分都留着，点「接着写」从断点继续")
+                Spacer()
+                if pipeline.failedArticles.count > 1 {
+                    Button("全部接着写") { for a in pipeline.failedArticles { pipeline.resume(a.id) } }
+                        .buttonStyle(GhostButton())
+                }
+            }
+            ForEach(pipeline.failedArticles) { a in
+                VStack(alignment: .leading, spacing: 6) {
+                    Button(a.displayTitle) { open(a.id) }.buttonStyle(LinkButton(color: Theme.ink))
+                    RunLog(articleId: a.id, compact: true)
+                }
             }
         }
         .card()
@@ -474,5 +484,74 @@ struct AutoSettingsView: View {
             }
             .card()
         }
+    }
+}
+
+// MARK: 运行日志（编辑器顶部、工作台都用）
+
+struct RunLog: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var pipeline: Pipeline
+    let articleId: UUID
+    var compact = false
+    @State private var all = false
+
+    var body: some View {
+        let a = store.article(articleId)
+        let lines = a?.log ?? []
+        let step = pipeline.running[articleId]
+        let failed = a?.failed ?? ""
+        let shown = all ? lines : Array(lines.suffix(compact ? 3 : 8))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                if step != nil {
+                    ProgressView().controlSize(.small)
+                    Text("正在写：\(step!)").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.blue)
+                } else if !failed.isEmpty {
+                    Image(systemName: "exclamationmark.octagon.fill").foregroundStyle(Theme.orange)
+                    Text("停下了").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.orange)
+                } else {
+                    Image(systemName: "list.bullet.rectangle").foregroundStyle(Theme.sub)
+                    Text("运行日志").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                }
+                Spacer()
+                if lines.count > shown.count || all {
+                    Button(all ? "收起" : "全部 \(lines.count) 条") { all.toggle() }.buttonStyle(LinkButton(color: Theme.sub))
+                }
+                if !lines.isEmpty {
+                    Button("复制日志") { Publisher.copyText(lines.joined(separator: "\n")) }.buttonStyle(LinkButton(color: Theme.sub))
+                }
+                if step == nil && !failed.isEmpty {
+                    Button { pipeline.resume(articleId) } label: {
+                        HStack(spacing: 4) { Image(systemName: "play.fill"); Text("接着写") }
+                    }
+                    .buttonStyle(PrimaryButton())
+                }
+            }
+            if !failed.isEmpty && step == nil {
+                Text(failed).font(.system(size: 12)).foregroundStyle(Theme.ink).textSelection(.enabled)
+                    .padding(10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.orangeBg, in: RoundedRectangle(cornerRadius: 8))
+            }
+            if !shown.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(shown.enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(RunLog.isError(line) ? Theme.orange : Theme.sub)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .textSelection(.enabled)
+            }
+        }
+        .padding(14)
+        .background(step != nil ? Theme.blueBg : (failed.isEmpty ? Color.white : Color.white),
+                    in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(!failed.isEmpty && step == nil ? Theme.orange.opacity(0.5) : Theme.rule, lineWidth: 1))
+    }
+
+    static func isError(_ line: String) -> Bool {
+        line.contains("出错") || line.contains("失败") || line.contains("停下")
     }
 }
