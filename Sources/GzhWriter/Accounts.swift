@@ -7,10 +7,17 @@ struct AccountsView: View {
     @State private var secrets: [UUID: String] = [:]
     @State private var tested: [UUID: String] = [:]
     @State private var removing: Account?
+    @State private var loggedIn: [UUID: Bool] = [:]
+
+    func refreshLogin() async {
+        for acc in store.data.accounts where acc.platform != "wechat" {
+            loggedIn[acc.id] = await PlatformFill.isLoggedIn(acc)
+        }
+    }
 
     var body: some View {
         Page(maxWidth: 900) {
-            PageHeader(title: "我的账号", subtitle: "每个平台可以有几个号。同一个领域的号选同一套风格就行，不用重复填范文。") {
+            PageHeader(title: "我的账号", subtitle: "每个平台可以有几个号，每个号只登录一次，之后会一直记住。") {
                 Menu {
                     ForEach(Platform.allCases) { p in
                         Button(p.name) { add(p) }
@@ -18,6 +25,10 @@ struct AccountsView: View {
                 } label: { Label("添加账号", systemImage: "plus") }
                 .menuStyle(.borderlessButton).fixedSize()
                 .buttonStyle(GhostButton())
+            }
+            .task { await refreshLogin() }
+            .onReceive(NotificationCenter.default.publisher(for: .gzhLoginChanged)) { _ in
+                Task { await refreshLogin() }
             }
 
             ForEach(Platform.allCases) { p in
@@ -81,7 +92,16 @@ struct AccountsView: View {
                 }
                 Spacer()
                 if acc.platform != "wechat" {
-                    Button("登录") { PlatformFill.login(acc) }.buttonStyle(GhostButton())
+                    if loggedIn[acc.id] == true {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("已登录")
+                        }
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.green)
+                        Button("重新登录") { PlatformFill.login(acc) }.buttonStyle(LinkButton(color: Theme.sub))
+                    } else {
+                        Button("登录") { PlatformFill.login(acc) }.buttonStyle(PrimaryButton())
+                    }
                 }
                 if store.data.accounts.count > 1 {
                     Button { removing = acc } label: { Image(systemName: "trash") }
