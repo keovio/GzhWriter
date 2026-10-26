@@ -23,7 +23,29 @@ final class Store: ObservableObject {
         if data.styles.isEmpty {
             data.styles = [StylePreset(name: "我的公众号", sample: "", avoid: "")]
         }
+        if ProcessInfo.processInfo.environment["GZH_DEMO"] != nil { demo() }
         migrateAccounts()
+    }
+
+    /// CI 截图用的示例数据（只在设置了 GZH_DEMO 时）
+    private func demo() {
+        guard data.articles.isEmpty else { return }
+        data.connections = [ModelConnection(name: "DeepSeek", baseURL: "https://api.deepseek.com", model: "deepseek-chat")]
+        data.styles[0].name = "考公小助手"
+        data.auto.platforms = ["wechat", "toutiao", "xiaohongshu"]
+        let titles = ["在职备考公务员，每天两小时怎么安排", "申论大作文，开头三句话定生死", "行测刷题十年，我只信这三个方法"]
+        for (i, t) in titles.enumerated() {
+            var a = Article()
+            a.title = t; a.topic = t; a.stage = .layout
+            a.styleId = data.styles[0].id
+            a.sections = [ArticleSection(heading: "先说结论", body: String(repeating: "备考最怕的不是时间少，而是没有节奏。", count: 20))]
+            a.created = Date().addingTimeInterval(Double(-i) * 3600 * 20)
+            data.articles.append(a)
+        }
+        var x = Article()
+        x.primary = "xiaohongshu"; x.topic = "上岸学姐的申论笔记本"; x.stage = .layout
+        x.variants["xiaohongshu"] = PlatformVariant(title: "上岸学姐的申论笔记本", tags: ["考公", "申论"], body: "三个月从 52 到 71 分，我只做了这几件事……")
+        data.articles.append(x)
     }
 
     /// 老版本没有账号：按原来的风格和打开的平台各建一个号，公众号沿用原来的 AppID / AppSecret
