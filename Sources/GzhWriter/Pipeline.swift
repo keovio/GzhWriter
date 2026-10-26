@@ -78,7 +78,7 @@ final class Pipeline: ObservableObject {
         self.store = store
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkDaily() }
+            Task { @MainActor in self?.checkDaily(); self?.checkReminders() }
         }
     }
 
@@ -114,6 +114,18 @@ final class Pipeline: ObservableObject {
         store.data.auto.lastDaily = now
         store.save()
         enqueue(direction: "", styleId: s.dailyStyleId ?? store.data.styles.first?.id)
+    }
+
+    /// 到了计划发布时间，提醒作者去发
+    private func checkReminders() {
+        let now = Date()
+        for a in store.data.articles where !a.published && !a.reminded {
+            guard let d = a.scheduled, d <= now else { continue }
+            store.update(a.id) { $0.reminded = true }
+            // 过期太久（比如电脑关着）就不补提醒
+            if now.timeIntervalSince(d) > 6 * 3600 { continue }
+            notify("该发文章了", "《\(a.displayTitle)》" + (a.wechatDraft.isEmpty ? "，复制排版好的正文去公众号后台发" : "，已在草稿箱，打开手机看一眼就能发"))
+        }
     }
 
     private func log(_ id: UUID, _ msg: String) {
@@ -157,10 +169,17 @@ final class Pipeline: ObservableObject {
             }
             log(id, "选题：\(t.topic)")
 
+            // 素材库：挑相关的真实素材
+            var mats: [Material] = []
+            if settings.useMaterials && !store.data.materials.isEmpty {
+                mats = MaterialPicker.attach(store, id)
+                if !mats.isEmpty { log(id, "用上 \(mats.count) 条素材") }
+            }
+
             // 2 大纲
             log(id, "定文章类型、写大纲")
             guard let a1 = store.article(id) else { return id }
-            let o = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(a1, style: style, ref: ref))
+            let o = try await store.runJSON(.topic, OutlineReply.self, Prompts.outline(a1, style: style, ref: ref, mats: mats))
             store.update(id) {
                 if let tt = o.title, !tt.isEmpty { $0.title = tt }
                 if $0.kind == "auto", let k = o.kind, let kk = ArticleKind(rawValue: k), kk != .auto { $0.kind = kk.rawValue }
@@ -175,7 +194,7 @@ final class Pipeline: ObservableObject {
             for i in 0..<n {
                 log(id, "写第 \(i + 1)/\(n) 部分")
                 guard let a = store.article(id), i < a.sections.count else { break }
-                let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per, ref: ref))
+                let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per, ref: ref, mats: mats))
                 store.update(id) { if i < $0.sections.count { $0.sections[i].body = Humanize.clean(text) } }
             }
 
@@ -248,10 +267,17 @@ final class Pipeline: ObservableObject {
                 catch { log(id, "推草稿箱失败：\(error.localizedDescription)") }
             }
 
+            // 8 排进发布日历
+            var when = ""
+            if settings.autoSchedule, let slot = PublishPlan.schedule(store, id) {
+                when = PublishPlan.label(slot)
+                log(id, "排到 \(when) 发布，到点提醒你")
+            }
+
             let score = store.article(id)?.review?.total ?? 0
             log(id, "完成，\(score) 分，等你过目")
             notify(pushed ? "已进公众号草稿箱（\(score) 分）" : "草稿写好了（\(score) 分）",
-                   (store.article(id)?.displayTitle ?? "") + (pushed ? "，在手机上看一眼再发表" : ""))
+                   (store.article(id)?.displayTitle ?? "") + (pushed ? "，在手机上看一眼再发表" : "") + (when.isEmpty ? "" : "。计划 \(when) 发"))
         } catch {
             log(id, "出错：\(error.localizedDescription)")
             lastError = error.localizedDescription
