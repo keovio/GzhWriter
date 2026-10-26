@@ -304,6 +304,7 @@ struct ArticleRow: View {
                     .font(.system(size: 11)).foregroundStyle(Theme.faint)
                 }
                 Spacer()
+                platformDots
                 if article.auto { Chip(text: "一键成稿") }
                 if let s = article.review?.total, running == nil { ScoreBadge(score: s) }
             }
@@ -313,6 +314,22 @@ struct ArticleRow: View {
         }
         .buttonStyle(RowButton())
         .onHover { hover = $0 }
+    }
+
+    /// 每个平台一个小点：灰=没版本，浅色=有版本没发，实心=发了
+    var platformDots: some View {
+        let keys = ["wechat"] + Platform.allCases.filter { $0 != .wechat }.map(\.rawValue)
+        return HStack(spacing: 3) {
+            ForEach(keys, id: \.self) { k in
+                let p = Platform.of(k)!
+                let has = k == "wechat" ? article.stage == .layout : article.variants[k] != nil
+                let done = k == "wechat" ? article.published : (article.variants[k]?.posted ?? false)
+                if has {
+                    Circle().fill(done ? p.color : p.color.opacity(0.25)).frame(width: 7, height: 7)
+                        .help(p.name + (done ? "已发" : "未发"))
+                }
+            }
+        }
     }
 
     var statusText: String {
