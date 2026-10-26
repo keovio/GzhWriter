@@ -388,11 +388,13 @@ struct LibraryView: View {
     var open: (UUID) -> Void
     @State private var query = ""
     @State private var filter = 0      // 0 全部 1 待发布 2 写作中
+    @State private var accountFilter: UUID?
 
     var items: [Article] {
         store.data.articles.filter { a in
             (query.isEmpty || a.displayTitle.localizedCaseInsensitiveContains(query) || a.topic.localizedCaseInsensitiveContains(query))
             && (filter == 0 || (filter == 1 ? a.stage == .layout : a.stage != .layout))
+            && (accountFilter == nil || a.accountId == accountFilter)
         }
     }
 
@@ -416,6 +418,15 @@ struct LibraryView: View {
                         .foregroundStyle(filter == i ? Theme.blue : Theme.sub)
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(filter == i ? Theme.blueBg : Color.clear, in: Capsule())
+                }
+                if store.data.accounts.count > 1 {
+                    Picker("", selection: $accountFilter) {
+                        Text("全部账号").tag(UUID?.none)
+                        ForEach(store.data.accounts) { acc in
+                            Text("\(Platform.of(acc.platform)?.name ?? "")·\(acc.name)").tag(Optional(acc.id))
+                        }
+                    }
+                    .labelsHidden().frame(width: 170)
                 }
                 Spacer()
                 Text("\(items.count) 篇").font(.system(size: 12)).foregroundStyle(Theme.faint)
