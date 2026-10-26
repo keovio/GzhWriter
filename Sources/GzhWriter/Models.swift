@@ -324,6 +324,14 @@ enum Role: String, Codable, CaseIterable, Identifiable {
         case .review: return "审稿"
         }
     }
+    /// 哪些功能用这个模型
+    var uses: String {
+        switch self {
+        case .topic: return "选题、大纲、选题库、配图规划"
+        case .draft: return "写正文、返修、各平台版本、小红书/微博"
+        case .review: return "审稿打分、标题多选、爆文拆解"
+        }
+    }
 }
 
 struct AppData: Codable {
