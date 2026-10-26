@@ -42,6 +42,9 @@ struct ContentView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.light)
         .onReceive(NotificationCenter.default.publisher(for: .newArticle)) { _ in newArticle() }
+        .onChange(of: pipeline.focus) { id in
+            if let id { open(id); pipeline.focus = nil }
+        }
         .onAppear { if store.data.connections.isEmpty && ProcessInfo.processInfo.environment["GZH_PANE"] == nil { pane = .models } }
     }
 
