@@ -13,6 +13,9 @@ enum WechatError: LocalizedError {
         case .api(let code, let msg):
             switch code {
             case 40164, 61004:
+                if let ip = WechatError.ipIn(msg) {
+                    return "微信看到你的 IP 是 \(ip)，它不在白名单里。把 \(ip) 加到公众号后台「设置与开发 → 开发接口管理 → IP 白名单」，等一两分钟再试。开着代理/VPN 或家里宽带换了 IP 都会变。（\(code)）"
+                }
                 return "这台电脑的 IP 不在公众号白名单里。到公众号后台「设置与开发 → 开发接口管理 → IP 白名单」把本机 IP 加进去。（\(code)）"
             case 40001, 40125, 40013:
                 return "AppID 或 AppSecret 不对，重新复制一遍试试。（\(code)）"
@@ -24,6 +27,14 @@ enum WechatError: LocalizedError {
                 return "公众号接口返回错误 \(code)：\(msg)"
             }
         }
+    }
+}
+
+extension WechatError {
+    /// 微信报错里带着它实际看到的 IP：invalid ip 1.2.3.4 ipv6 ...
+    static func ipIn(_ msg: String) -> String? {
+        guard let r = msg.range(of: #"\d{1,3}(\.\d{1,3}){3}"#, options: .regularExpression) else { return nil }
+        return String(msg[r])
     }
 }
 
@@ -50,10 +61,18 @@ final class Wechat {
     func reset() { token = ""; expires = .distantPast }
 
     /// 本机公网 IP，方便用户加白名单
+    /// 查本机出口 IP。先用国内服务：开着代理时，访问微信一般走直连，国外查到的是代理的 IP，不准。
     static func publicIP() async -> String? {
-        guard let u = URL(string: "https://api.ipify.org"),
-              let res = try? await URLSession.shared.data(from: u) else { return nil }
-        return String(data: res.0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        for s in ["https://4.ipw.cn", "https://myip.ipip.net", "https://api.ipify.org"] {
+            guard let u = URL(string: s) else { continue }
+            var req = URLRequest(url: u)
+            req.timeoutInterval = 6
+            guard let (d, _) = try? await URLSession.shared.data(for: req),
+                  let t = String(data: d, encoding: .utf8),
+                  let ip = WechatError.ipIn(t) else { continue }
+            return ip
+        }
+        return nil
     }
 
     /// 测试：拿一次 token
