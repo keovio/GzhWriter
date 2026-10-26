@@ -169,7 +169,11 @@ final class Store: ObservableObject {
     func connections(for role: Role) -> [ModelConnection] {
         let ids = data.roles[role.rawValue] ?? []
         let picked = ids.compactMap { id in data.connections.first { $0.id == id } }
-        return picked.isEmpty ? data.connections : picked
+        return (picked.isEmpty ? data.connections : picked).map { c in
+            var c = c
+            if let m = data.roleModels["\(role.rawValue).\(c.id.uuidString)"], !m.isEmpty { c.model = m }
+            return c
+        }
     }
 
     func run(_ role: Role, _ messages: [ChatMessage], temperature: Double = 0.7) async throws -> String {
