@@ -27,7 +27,7 @@ enum Prompts {
         [.system(base), .user("""
         \(profile(style))
         \(direction.isEmpty ? "作者没有指定方向，请按赛道和读者自己挑。" : "作者想写的方向：\(direction)")
-        \(hot.isEmpty ? "" : "今日热榜（可以借势，但只选和赛道相关、能写出干货的，不要硬蹭）：\n" + hot.prefix(40).joined(separator: "\n"))
+        \(hot.isEmpty ? "" : "今日热榜和同领域公众号热文（可以借势，但只选和赛道相关、能写出干货的，不要硬蹭；热文只借选题方向，换自己的角度，不能照搬标题）：\n" + hot.prefix(60).joined(separator: "\n"))
         \(existing.isEmpty ? "" : "已经写过的选题（不要重复，也不要换个说法写同一件事）：" + existing.prefix(80).joined(separator: "；"))
         \(avoidSimilar.isEmpty ? "" : "你刚才挑的「" + avoidSimilar.joined(separator: "」「") + "」和写过的太像了，这次换一个不同的点。")
         \(ref.map { "这篇要套用一篇爆文的写法，挑一个适合这种写法的选题。这种写法适合：" + $0.fitTopics.joined(separator: "、") } ?? "")
