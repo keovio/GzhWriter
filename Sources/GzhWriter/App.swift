@@ -6,12 +6,14 @@ import WebKit
 struct GzhWriterApp: App {
     @StateObject private var store: Store
     @StateObject private var pipeline: Pipeline
+    @StateObject private var radar: HotRadar
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     init() {
         let s = Store()
         _store = StateObject(wrappedValue: s)
         _pipeline = StateObject(wrappedValue: Pipeline(store: s))
+        _radar = StateObject(wrappedValue: HotRadar(store: s))
     }
 
     var body: some Scene {
@@ -19,6 +21,7 @@ struct GzhWriterApp: App {
             ContentView()
                 .environmentObject(store)
                 .environmentObject(pipeline)
+                .environmentObject(radar)
                 .frame(minWidth: 1180, minHeight: 740)
         }
         .windowStyle(.hiddenTitleBar)
