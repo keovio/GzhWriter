@@ -53,8 +53,40 @@ enum Prompts {
     }
 
     static func styleBlock(_ s: StylePreset?) -> String {
-        guard let s, !s.sample.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
-        return "\n【作者范文，模仿它的口吻、句子长短和用词习惯，不要照抄内容】\n\(s.sample.prefix(3000))\n"
+        guard let s else { return "" }
+        var out = ""
+        let guide = s.guide.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !guide.isEmpty { out += "\n【这个号的写作风格说明，严格按它写】\n\(guide)\n" }
+        let sample = s.sample.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sample.isEmpty {
+            out += "\n【作者范文，模仿它的口吻、句子长短和用词习惯，不要照抄内容】\n\(sample.prefix(guide.isEmpty ? 3000 : 1500))\n"
+        }
+        return out
+    }
+
+    /// 分析范文，结合赛道和读者，总结成可执行的风格说明
+    static func analyzeStyle(_ s: StylePreset) -> [ChatMessage] {
+        [.system("你是资深新媒体主编，擅长把一个号的文风拆成写手能照着执行的规则。说具体的、可模仿的做法，不说空话。"), .user("""
+        赛道：\(s.track.isEmpty ? "（没填，从范文判断）" : s.track)
+        读者：\(s.audience.isEmpty ? "（没填，从范文判断）" : s.audience)
+        不写的话题：\(s.avoid.isEmpty ? "无" : s.avoid)
+
+        范文：
+        \(s.sample.prefix(9000))
+
+        分析范文的写法，结合赛道和读者，总结这个号的风格。每一项写一两句具体做法，能举例就从范文里摘短句举例。
+        只输出 JSON：
+        {"summary":"一句话概括这个号的风格和人设",
+         "persona":"作者以什么身份、什么姿态跟读者说话",
+         "tone":"语气和情绪",
+         "structure":"文章常用结构：怎么开头、怎么展开、怎么收尾",
+         "sentences":"句子长短、段落长短、节奏",
+         "wording":"常用词、口头禅、称呼读者的方式、标点习惯",
+         "titles":"标题的写法和套路",
+         "dos":["要这样写，3到5条"],
+         "donts":["别这样写，3到5条"],
+         "topics":["适合这个号写的选题方向，3到5个"]}
+        """)]
     }
 
     static func ideas(direction: String, avoid: String, existing: [String]) -> [ChatMessage] {
