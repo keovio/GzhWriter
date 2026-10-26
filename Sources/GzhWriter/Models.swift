@@ -131,13 +131,14 @@ struct Article: Identifiable, Codable, Hashable {
     var reminded = false
     var published = false
     var failed = ""             // 自动流程停在哪一步出错（空=没出错），可以从断点继续
+    var accountId: UUID?        // 写给哪个账号
     var primary = "wechat"      // 主平台：wechat=公众号长文；xiaohongshu/weibo=直接写的短内容，正文在 variants[primary]
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, accountId, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -173,6 +174,7 @@ struct Article: Identifiable, Codable, Hashable {
         published = (try? c.decode(Bool.self, forKey: .published)) ?? false
         failed = (try? c.decode(String.self, forKey: .failed)) ?? ""
         primary = (try? c.decode(String.self, forKey: .primary)) ?? "wechat"
+        accountId = try? c.decodeIfPresent(UUID.self, forKey: .accountId)
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
@@ -345,10 +347,11 @@ struct AppData: Codable {
     var wechat = WechatSettings()
     var breakdowns: [Breakdown] = []
     var materials: [Material] = []
+    var accounts: [Account] = []
     var hot: [HotArticle] = []
     var hotNames: [String: String] = [:]
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials, hot, hotNames }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials, hot, hotNames, accounts }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -361,6 +364,7 @@ struct AppData: Codable {
         wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
         breakdowns = (try? c.decode([Breakdown].self, forKey: .breakdowns)) ?? []
         materials = (try? c.decode([Material].self, forKey: .materials)) ?? []
+        accounts = (try? c.decode([Account].self, forKey: .accounts)) ?? []
         hot = (try? c.decode([HotArticle].self, forKey: .hot)) ?? []
         hotNames = (try? c.decode([String: String].self, forKey: .hotNames)) ?? [:]
     }
@@ -544,4 +548,16 @@ struct Material: Identifiable, Codable, Hashable {
         uses = (try? c.decode(Int.self, forKey: .uses)) ?? 0
         created = (try? c.decode(Date.self, forKey: .created)) ?? Date()
     }
+}
+
+
+/// 一个账号 = 平台 + 名字 + 用哪套风格。同赛道的号共用一套风格。
+struct Account: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var platform = "wechat"
+    var name = ""
+    var styleId: UUID?
+    var appId = ""              // 只有公众号用：草稿箱接口
+
+    var secretKey: String { "wechat.appsecret." + id.uuidString }
 }
