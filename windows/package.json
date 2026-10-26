@@ -7,18 +7,33 @@
   "author": "keovi",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --win nsis portable --x64 --publish never"
+    "dist": "electron-builder --win nsis portable --x64 --publish never",
+    "postinstall": "node -e \"require('fs').mkdirSync('renderer/vendor',{recursive:true});require('fs').copyFileSync('node_modules/vue/dist/vue.global.prod.js','renderer/vendor/vue.global.prod.js')\""
   },
   "devDependencies": {
     "electron": "33.2.1",
-    "electron-builder": "25.1.8"
+    "electron-builder": "25.1.8",
+    "vue": "3.5.13"
   },
   "build": {
     "appId": "com.keovi.gzhwriter",
     "productName": "公众号写稿助手",
     "artifactName": "GzhWriter-${version}-${arch}-${target}.${ext}",
-    "files": ["main.js", "preload.js", "renderer/**/*"],
-    "win": { "target": ["nsis", "portable"] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "shortcutName": "公众号写稿助手" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "公众号写稿助手"
+    }
   }
 }
