@@ -108,14 +108,6 @@ struct Sidebar: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
 
-            Button(action: newArticle) {
-                HStack { Image(systemName: "square.and.pencil"); Text("新建稿件"); Spacer(); Text("⌘N").foregroundStyle(.white.opacity(0.6)) }
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(PrimaryButton())
-            .padding(.horizontal, 12)
-            .padding(.bottom, 14)
-
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(NavGroup.allCases, id: \.self) { g in
