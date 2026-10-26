@@ -27,7 +27,16 @@ struct ContentView: View {
         .onAppear { if store.data.connections.isEmpty { pane = .models } }
     }
 
-    @ViewBuilder var detail: some View {
+    var detail: some View {
+        VStack(spacing: 0) {
+            if let g = NavGroup.of(pane), g.tabs.count > 1 {
+                HubTabs(group: g, pane: $pane)
+            }
+            page.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder var page: some View {
         switch pane {
         case .workbench: WorkbenchView(open: open)
         case .ideas: IdeasView(open: open)
@@ -41,7 +50,9 @@ struct ContentView: View {
         case .auto: AutoSettingsView()
         case .publish: PublishSettingsView()
         case .article(let id):
-            if store.article(id) != nil {
+            if let a = store.article(id), a.isShort {
+                ShortArticleView(articleId: id, close: { pane = back }).id(id)
+            } else if store.article(id) != nil {
                 ArticleEditor(articleId: id, close: { pane = back }).id(id)
             } else {
                 Page { Text("稿件已删除").foregroundStyle(Theme.sub) }
@@ -88,19 +99,9 @@ struct Sidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    group("内容")
-                    item("工作台", "square.grid.2x2", .workbench, badge: pipeline.running.isEmpty ? nil : "\(pipeline.running.count)")
-                    item("选题库", "lightbulb", .ideas, badge: openIdeas == 0 ? nil : "\(openIdeas)")
-                    item("稿件库", "doc.text", .library, badge: store.data.articles.isEmpty ? nil : "\(store.data.articles.count)")
-                    item("热点雷达", "flame", .radar)
-                    item("发布日历", "calendar", .plan, badge: upcoming == 0 ? nil : "\(upcoming)")
-                    item("素材库", "tray.full", .materials, badge: store.data.materials.isEmpty ? nil : "\(store.data.materials.count)")
-                    item("爆文拆解", "scissors", .breakdown, badge: store.data.breakdowns.isEmpty ? nil : "\(store.data.breakdowns.count)")
-                    group("配置")
-                    item("账号设定", "person.crop.rectangle", .styles)
-                    item("模型与分工", "cpu", .models, badge: store.data.connections.isEmpty ? "!" : nil)
-                    item("自动化", "bolt", .auto, badge: store.data.auto.dailyEnabled ? "开" : nil)
-                    item("发布与分发", "paperplane", .publish, badge: store.data.wechat.autoPush ? "开" : nil)
+                    ForEach(NavGroup.allCases, id: \.self) { g in
+                        SideItem(title: g.name, icon: g.icon, on: NavGroup.of(pane) == g, badge: badge(g)) { pane = g.tabs[0].1 }
+                    }
 
                     if !recent.isEmpty {
                         group("最近")
@@ -120,6 +121,15 @@ struct Sidebar: View {
             .padding(16)
         }
         .background(Theme.sidebar)
+    }
+
+    func badge(_ g: NavGroup) -> String? {
+        switch g {
+        case .home: return pipeline.running.isEmpty ? (pipeline.failedArticles.isEmpty ? nil : "!") : "\(pipeline.running.count)"
+        case .articles: return upcoming == 0 ? nil : "\(upcoming)"
+        case .settings: return store.data.connections.isEmpty ? "!" : nil
+        case .hot: return nil
+        }
     }
 
     var upcoming: Int { store.data.articles.filter { $0.scheduled != nil && !$0.published }.count }
@@ -169,5 +179,69 @@ struct SideItem: View {
             .animation(.easeOut(duration: 0.12), value: hover)
         }
         .buttonStyle(RowButton())
+    }
+}
+
+
+/// 侧栏只有四项，每项里面用顶部标签切换
+enum NavGroup: CaseIterable {
+    case home, hot, articles, settings
+
+    var name: String {
+        switch self {
+        case .home: return "工作台"
+        case .hot: return "热点"
+        case .articles: return "稿件"
+        case .settings: return "设置"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .home: return "square.grid.2x2"
+        case .hot: return "flame"
+        case .articles: return "doc.text"
+        case .settings: return "gearshape"
+        }
+    }
+
+    var tabs: [(String, Pane)] {
+        switch self {
+        case .home: return [("工作台", .workbench)]
+        case .hot: return [("热点雷达", .radar), ("爆文拆解", .breakdown), ("选题库", .ideas)]
+        case .articles: return [("全部稿件", .library), ("发布日历", .plan)]
+        case .settings: return [("模型", .models), ("账号设定", .styles), ("平台与发布", .publish), ("自动化", .auto), ("素材库", .materials)]
+        }
+    }
+
+    static func of(_ p: Pane) -> NavGroup? {
+        allCases.first { g in g.tabs.contains { $0.1 == p } }
+    }
+}
+
+struct HubTabs: View {
+    let group: NavGroup
+    @Binding var pane: Pane
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(group.tabs, id: \.0) { name, p in
+                Button { pane = p } label: {
+                    Text(name)
+                        .font(.system(size: 13, weight: pane == p ? .semibold : .regular))
+                        .foregroundStyle(pane == p ? Theme.navy : Theme.sub)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(pane == p ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Color.clear)).frame(height: 2)
+                        }
+                }
+                .buttonStyle(RowButton())
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 30)
+        .background(Theme.sheet)
+        .overlay(alignment: .bottom) { Rectangle().fill(Theme.rule).frame(height: 1) }
     }
 }
