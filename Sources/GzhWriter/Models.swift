@@ -177,7 +177,7 @@ struct Article: Identifiable, Codable, Hashable {
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
 
-    var isShort: Bool { primary != "wechat" }
+    var isShort: Bool { primary == "xiaohongshu" || primary == "weibo" }
     var shortVariant: PlatformVariant? { isShort ? variants[primary] : nil }
 
     var displayTitle: String {
