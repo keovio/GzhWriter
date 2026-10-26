@@ -233,8 +233,12 @@ struct AutoSettings: Codable, Hashable {
     var publishDays: [Int] = [2, 4, 6]   // 1=周日 … 7=周六
     var publishHour = 20
     var publishMinute = 0
+    var hotCategories: [String] = ["综合"]
+    var hotAuto = true
+    var hotForTopic = true
+    var lastHotFetch: Date?
 
-    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance, useMaterials, autoSchedule, publishDays, publishHour, publishMinute }
+    enum CodingKeys: String, CodingKey { case hotCategories, hotAuto, hotForTopic, lastHotFetch, passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance, useMaterials, autoSchedule, publishDays, publishHour, publishMinute }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -259,6 +263,10 @@ struct AutoSettings: Codable, Hashable {
         publishDays = (try? c.decode([Int].self, forKey: .publishDays)) ?? d.publishDays
         publishHour = (try? c.decode(Int.self, forKey: .publishHour)) ?? d.publishHour
         publishMinute = (try? c.decode(Int.self, forKey: .publishMinute)) ?? d.publishMinute
+        hotCategories = (try? c.decode([String].self, forKey: .hotCategories)) ?? d.hotCategories
+        hotAuto = (try? c.decode(Bool.self, forKey: .hotAuto)) ?? d.hotAuto
+        hotForTopic = (try? c.decode(Bool.self, forKey: .hotForTopic)) ?? d.hotForTopic
+        lastHotFetch = try? c.decodeIfPresent(Date.self, forKey: .lastHotFetch)
     }
 }
 
@@ -293,8 +301,10 @@ struct AppData: Codable {
     var wechat = WechatSettings()
     var breakdowns: [Breakdown] = []
     var materials: [Material] = []
+    var hot: [HotArticle] = []
+    var hotNames: [String: String] = [:]
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials, hot, hotNames }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -307,6 +317,8 @@ struct AppData: Codable {
         wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
         breakdowns = (try? c.decode([Breakdown].self, forKey: .breakdowns)) ?? []
         materials = (try? c.decode([Material].self, forKey: .materials)) ?? []
+        hot = (try? c.decode([HotArticle].self, forKey: .hot)) ?? []
+        hotNames = (try? c.decode([String: String].self, forKey: .hotNames)) ?? [:]
     }
 }
 
