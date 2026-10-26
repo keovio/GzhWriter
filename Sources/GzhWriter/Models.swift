@@ -132,13 +132,14 @@ struct Article: Identifiable, Codable, Hashable {
     var published = false
     var failed = ""             // 自动流程停在哪一步出错（空=没出错），可以从断点继续
     var accountId: UUID?        // 写给哪个账号
+    var posts: [String: Date] = [:]   // 哪些账号发过了：账号 ID → 时间
     var primary = "wechat"      // 主平台：wechat=公众号长文；xiaohongshu/weibo=直接写的短内容，正文在 variants[primary]
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, accountId, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, accountId, posts, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -175,6 +176,7 @@ struct Article: Identifiable, Codable, Hashable {
         failed = (try? c.decode(String.self, forKey: .failed)) ?? ""
         primary = (try? c.decode(String.self, forKey: .primary)) ?? "wechat"
         accountId = try? c.decodeIfPresent(UUID.self, forKey: .accountId)
+        posts = (try? c.decode([String: Date].self, forKey: .posts)) ?? [:]
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
