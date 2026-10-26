@@ -15,11 +15,46 @@ final class Store: ObservableObject {
     }
     static var file: URL { folder.appendingPathComponent("data.json") }
 
+    static weak var shared: Store?
+
     init() {
         load()
+        Self.shared = self
         if data.styles.isEmpty {
             data.styles = [StylePreset(name: "我的公众号", sample: "", avoid: "")]
         }
+        migrateAccounts()
+    }
+
+    /// 老版本没有账号：按原来的风格和打开的平台各建一个号，公众号沿用原来的 AppID / AppSecret
+    func migrateAccounts() {
+        guard data.accounts.isEmpty else { return }
+        let style = data.styles.first
+        let name = style?.name ?? "我的公众号"
+        var wx = Account(platform: "wechat", name: name, styleId: style?.id, appId: data.wechat.appId)
+        if let old = Keychain.get(Wechat.secretKey), !old.isEmpty { Keychain.set(old, for: wx.secretKey) }
+        wx.appId = data.wechat.appId
+        data.accounts = [wx]
+        for p in data.auto.platforms where p != "wechat" && Platform.of(p) != nil {
+            data.accounts.append(Account(platform: p, name: name, styleId: style?.id))
+        }
+        save()
+    }
+
+    func account(_ id: UUID?) -> Account? {
+        guard let id else { return nil }
+        return data.accounts.first { $0.id == id }
+    }
+
+    func accounts(on platform: String) -> [Account] {
+        data.accounts.filter { $0.platform == platform }
+    }
+
+    /// 推草稿箱用哪个公众号：稿件自己的号 → 同风格的公众号 → 第一个配好了的公众号
+    func wechatAccount(for a: Article) -> Account? {
+        let wx = accounts(on: "wechat").filter { !$0.appId.isEmpty }
+        if let acc = account(a.accountId), acc.platform == "wechat", !acc.appId.isEmpty { return acc }
+        return wx.first { $0.styleId == a.styleId } ?? wx.first
     }
 
     func load() {
