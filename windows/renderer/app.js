@@ -234,7 +234,8 @@ const Editor = {
           </div>
           <div class="empty" v-if="!a.sections.length">{{ S.running[a.id] ? '正在写…' : '还没有正文' }}</div>
         </div>
-        <div class="card" v-if="a.review"><div class="st">审稿 <small>{{ a.review.summary }}</small><span class="sp"></span><span class="score" :style="{color: a.review.total >= S.data.auto.passScore ? 'var(--green)' : 'var(--orange)'}">{{ a.review.total }} 分</span></div>
+        <div class="card" v-if="a.review"><div class="st">审稿<span class="sp"></span><span class="score" :style="{color: a.review.total >= S.data.auto.passScore ? 'var(--green)' : 'var(--orange)'}">{{ a.review.total }} 分</span></div>
+          <div class="muted" style="margin:-4px 0 10px">{{ a.review.summary }}</div>
           <div class="row wrap" style="margin-bottom:10px"><span class="mtag" v-for="(v, k) in a.review.scores">{{ k }} {{ v }}</span><span class="sp"></span><button class="btn link" @click="rereview">重新审稿</button></div>
           <div v-for="s in a.review.suggestions" style="padding:6px 0;border-top:1px solid var(--rule)"><b>{{ s.section ? '第 ' + s.section + ' 部分' : '全文' }}</b>：{{ s.issue }} <span class="muted">→ {{ s.fix }}</span></div>
           <div v-if="a.review.factChecks && a.review.factChecks.length" style="margin-top:10px"><b>要核实：</b><span class="muted">{{ a.review.factChecks.join('；') }}</span></div>
