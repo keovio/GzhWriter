@@ -494,7 +494,7 @@ struct RadarView: View {
 
     var body: some View {
         Page {
-            PageHeader(title: "热点雷达", subtitle: "公众号爆文，加上头条、百度、知乎、微博、抖音、小红书的热榜。只学选题和写法，不搬原文。") {
+            PageHeader(title: "热点雷达", subtitle: "公众号爆文，加上头条、百度、知乎、微博、小红书的热榜。只学选题和写法，不搬原文。") {
                 Button { Task { await radar.refresh() } } label: {
                     HStack(spacing: 4) { Image(systemName: "arrow.clockwise"); Text(radar.loading ? "读取中…" : "刷新") }
                 }
