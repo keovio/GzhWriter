@@ -37,14 +37,8 @@ struct ArticleEditor: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         BusyBar(busy: busy)
-                        if let step = pipeline.running[articleId] {
-                            HStack(spacing: 10) {
-                                ProgressView().controlSize(.small)
-                                Text("正在自动生产：\(step)").font(.system(size: 13)).foregroundStyle(Theme.blue)
-                                Spacer()
-                            }
-                            .padding(12)
-                            .background(Theme.blueBg, in: RoundedRectangle(cornerRadius: 10))
+                        if pipeline.running[articleId] != nil || !a.failed.isEmpty {
+                            RunLog(articleId: articleId)
                         }
                         let hits = Humanize.hits(a.plainText)
                         if !hits.isEmpty {
@@ -70,18 +64,11 @@ struct ArticleEditor: View {
                             TitleCard(articleId: articleId)
                             ComplianceCard(articleId: articleId)
                         }
-                        if a.stage == .layout { DistributeCard(articleId: articleId) }
-                        if !a.log.isEmpty {
-                            DisclosureGroup("运行记录（\(a.log.count) 条）") {
-                                Text(a.log.joined(separator: "\n"))
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundStyle(Theme.sub)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.top, 6)
-                            }
-                            .font(.system(size: 12))
-                            .card(padding: 14)
+                        if a.stage == .layout || a.sections.contains(where: { !$0.body.isEmpty }) {
+                            DistributeCard(articleId: articleId)
+                        }
+                        if !a.log.isEmpty && pipeline.running[articleId] == nil && a.failed.isEmpty {
+                            RunLog(articleId: articleId, compact: true)
                         }
                     }
                     .padding(24)
