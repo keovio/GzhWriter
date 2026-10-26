@@ -389,6 +389,8 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var filter = 0      // 0 全部 1 待发布 2 写作中
     @State private var accountFilter: UUID?
+    @State private var selecting = false
+    @State private var selected = Set<UUID>()
 
     var items: [Article] {
         store.data.articles.filter { a in
@@ -401,8 +403,14 @@ struct LibraryView: View {
     var body: some View {
         Page {
             PageHeader(title: "稿件库", subtitle: "写过的文章都在这里，自动选题会避开这些题目。") {
-                Button { open(store.newArticle()) } label: { Label("新建", systemImage: "plus") }
+                HStack(spacing: 8) {
+                    Button { selecting.toggle(); if !selecting { selected = [] } } label: {
+                        Label(selecting ? "退出批量" : "批量", systemImage: "checklist")
+                    }
                     .buttonStyle(GhostButton())
+                    Button { open(store.newArticle()) } label: { Label("新建", systemImage: "plus") }
+                        .buttonStyle(GhostButton())
+                }
             }
             HStack(spacing: 12) {
                 HStack {
@@ -438,7 +446,19 @@ struct LibraryView: View {
                 }
                 ForEach(Array(items.enumerated()), id: \.element.id) { i, a in
                     if i > 0 { Divider().overlay(Theme.rule) }
-                    ArticleRow(article: a, running: pipeline.running[a.id]) { open(a.id) }
+                    HStack(spacing: 4) {
+                        if selecting {
+                            Image(systemName: selected.contains(a.id) ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 16))
+                                .foregroundStyle(selected.contains(a.id) ? Theme.blue : Theme.faint)
+                                .padding(.leading, 6)
+                        }
+                        ArticleRow(article: a, running: pipeline.running[a.id]) {
+                            if selecting {
+                                if selected.contains(a.id) { selected.remove(a.id) } else { selected.insert(a.id) }
+                            } else { open(a.id) }
+                        }
+                    }
                         .contextMenu {
                             Button("复制富文本") { Layout.copyRichText(a, signature: store.style(a.styleId)?.signature ?? "") }
                             Divider()
@@ -447,7 +467,16 @@ struct LibraryView: View {
                 }
             }
             .card(padding: 12)
+            if selecting { Color.clear.frame(height: 110) }
         }
+        .overlay(alignment: .bottom) {
+            if selecting {
+                BatchBar(selected: $selected, visible: items.map(\.id)) { selecting = false; selected = [] }
+                    .padding(.horizontal, 24).padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: selecting)
     }
 }
 
