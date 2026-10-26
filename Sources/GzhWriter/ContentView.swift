@@ -128,7 +128,7 @@ struct Sidebar: View {
         case .home: return pipeline.running.isEmpty ? (pipeline.failedArticles.isEmpty ? nil : "!") : "\(pipeline.running.count)"
         case .articles: return upcoming == 0 ? nil : "\(upcoming)"
         case .settings: return store.data.connections.isEmpty ? "!" : nil
-        case .hot: return nil
+        case .hot, .writing: return nil
         }
     }
 
@@ -185,13 +185,14 @@ struct SideItem: View {
 
 /// 侧栏只有四项，每项里面用顶部标签切换
 enum NavGroup: CaseIterable {
-    case home, hot, articles, settings
+    case home, hot, articles, writing, settings
 
     var name: String {
         switch self {
         case .home: return "工作台"
-        case .hot: return "热点"
+        case .hot: return "选题"
         case .articles: return "稿件"
+        case .writing: return "我的风格"
         case .settings: return "设置"
         }
     }
@@ -201,6 +202,7 @@ enum NavGroup: CaseIterable {
         case .home: return "square.grid.2x2"
         case .hot: return "flame"
         case .articles: return "doc.text"
+        case .writing: return "person.text.rectangle"
         case .settings: return "gearshape"
         }
     }
@@ -208,9 +210,10 @@ enum NavGroup: CaseIterable {
     var tabs: [(String, Pane)] {
         switch self {
         case .home: return [("工作台", .workbench)]
-        case .hot: return [("热点雷达", .radar), ("爆文拆解", .breakdown), ("选题库", .ideas)]
+        case .hot: return [("热点雷达", .radar), ("选题库", .ideas), ("爆文拆解", .breakdown)]
         case .articles: return [("全部稿件", .library), ("发布日历", .plan)]
-        case .settings: return [("模型", .models), ("账号设定", .styles), ("平台与发布", .publish), ("自动化", .auto), ("素材库", .materials)]
+        case .writing: return [("账号设定", .styles), ("素材库", .materials)]
+        case .settings: return [("模型", .models), ("平台与发布", .publish), ("自动化", .auto)]
         }
     }
 
