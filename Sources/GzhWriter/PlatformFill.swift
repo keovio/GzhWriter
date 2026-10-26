@@ -9,9 +9,7 @@ enum PlatformFill {
     static var windows: [NSWindow] = []
 
     static func url(_ platform: String) -> URL {
-        URL(string: platform == "toutiao"
-            ? "https://mp.toutiao.com/profile_v4/graphic/publish"
-            : "https://baijiahao.baidu.com/builder/rc/edit?type=news")!
+        (Platform.of(platform) ?? .toutiao).publishURL
     }
 
     static func open(store: Store, articleId: UUID, platform: String) {
@@ -20,7 +18,7 @@ enum PlatformFill {
         let host = NSHostingView(rootView: FillView(model: model))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = (platform == "toutiao" ? "头条号" : "百家号") + " · " + v.title
+        w.title = (Platform.of(platform)?.name ?? platform) + " · " + (v.title.isEmpty ? a.displayTitle : v.title)
         w.contentView = host
         w.isReleasedWhenClosed = false
         w.center()
@@ -33,6 +31,9 @@ enum PlatformFill {
 
     /// 正文 HTML：配图转成 data URI 内嵌
     static func bodyHTML(_ a: Article, _ v: PlatformVariant) -> String {
+        if !v.body.isEmpty {
+            return Layout.paragraphs(Publisher.platformFull(a, v)).map { "<p>\(Layout.esc($0))</p>" }.joined()
+        }
         var out = ""
         let intro = v.intro.trimmingCharacters(in: .whitespacesAndNewlines)
         let showH = ArticleKind.of(a.kind).showsHeadings
@@ -128,6 +129,9 @@ final class FillModel: ObservableObject {
     let variant: PlatformVariant
     let platform: String
     @Published var status = "正在打开…第一次用要先登录，登录一次之后会记住。"
+    var firstHint: String {
+        platform == "xiaohongshu" ? "小红书要先上传图片才会出现标题和正文框：点「复制封面」粘进去，或上传你自己的图。" : ""
+    }
     @Published var filled = false
     weak var web: WKWebView?
     private var tries = 0
@@ -157,7 +161,7 @@ final class FillModel: ObservableObject {
         guard let web else { return }
         let js = PlatformFill.script(title: variant.title,
                                      html: PlatformFill.bodyHTML(article, variant),
-                                     plain: Publisher.platformPlain(article, variant))
+                                     plain: variant.body.isEmpty ? Publisher.platformPlain(article, variant) : Publisher.platformFull(article, variant))
         web.evaluateJavaScript(js) { [weak self] result, error in
             Task { @MainActor in
                 guard let self else { return }
@@ -184,7 +188,7 @@ struct FillView: View {
             HStack(spacing: 10) {
                 Image(systemName: model.filled ? "checkmark.circle.fill" : "hourglass")
                     .foregroundStyle(model.filled ? Theme.green : Theme.navy)
-                Text(model.status).font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(2)
+                Text(model.filled || model.firstHint.isEmpty ? model.status : model.status + " " + model.firstHint).font(.system(size: 12)).foregroundStyle(Theme.ink).lineLimit(2)
                 Spacer()
                 Button(model.filled ? "重新填入" : "填入") { model.fill() }.buttonStyle(PrimaryButton())
                 Button(copied == "c" ? "已复制" : "复制封面") {
