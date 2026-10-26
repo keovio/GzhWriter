@@ -29,6 +29,24 @@ enum PlatformFill {
         }
     }
 
+    /// 只打开平台去登录（登录状态会记住，之后填稿不用再登）
+    static func login(_ p: Platform) {
+        let web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        web.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        web.load(URLRequest(url: p == .weibo ? URL(string: "https://weibo.com/login.php")! : p.publishURL))
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
+                         styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+        w.title = "登录\(p.name)（登录后直接关掉这个窗口就行）"
+        w.contentView = web
+        w.isReleasedWhenClosed = false
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        windows.append(w)
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            Task { @MainActor in windows.removeAll { $0 === w } }
+        }
+    }
+
     /// 正文 HTML：配图转成 data URI 内嵌
     static func bodyHTML(_ a: Article, _ v: PlatformVariant) -> String {
         if !v.body.isEmpty {
