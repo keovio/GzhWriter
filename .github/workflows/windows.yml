@@ -1,0 +1,75 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: build-win
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        shell: bash
+        run: npm install --no-audit --no-fund 2>&1 | tee ../install.log
+
+      - name: Screenshots
+        continue-on-error: true
+        shell: bash
+        env:
+          GZH_DEMO: '1'
+          GZH_SHOTS: workbench,library,editor,accounts,styles,models
+        run: |
+          timeout 120 npx electron . || true
+          ls shots
+
+      - name: Build exe
+        shell: bash
+        run: npm run dist 2>&1 | tee ../build.log
+
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; tail -60 ../install.log 2>/dev/null; echo; tail -80 ../build.log 2>/dev/null; echo '```'; } > report.md
+          gh issue create --title "Windows 构建失败 #${{ github.run_number }}" --body-file report.md
+
+      - name: Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls dist
+          gh release create "win-${{ github.run_number }}" dist/*.exe --title "Windows 版 win-${{ github.run_number }}" --notes "公众号写稿助手 Windows 版。Setup 是安装版，portable 是免安装版，双击就能用。" --target ${{ github.sha }}
+
+      - name: Push screenshots
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd shots
+          git init -q
+          git checkout -q -b shots-win
+          git add .
+          git -c user.name=ci -c user.email=ci@local commit -qm "win shots ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" shots-win
