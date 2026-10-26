@@ -306,7 +306,7 @@ struct BatchBar: View {
                 defer { s.update(id) { $0.accountId = old } }
                 try await Publisher.pushDraft(s, id) { m in s.update(id) { $0.log.append(m) } }
             } else {
-                let m = try await PlatformFill.saveDraft(store: s, articleId: id, account: acc)
+                let m = try await PlatformFill.saveDraft(store: s, articleId: id, account: acc, closeWhenDone: true)
                 s.update(id) { $0.log.append("\(name)「\(acc.name)」：\(m)") }
             }
         }
