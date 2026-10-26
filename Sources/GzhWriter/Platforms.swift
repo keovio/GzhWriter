@@ -96,7 +96,6 @@ struct HotSource: Identifiable, Hashable {
         .init(key: "baidu", name: "百度", node: "Jb0vmloB1G"),
         .init(key: "zhihu", name: "知乎", node: "mproPpoq6O"),
         .init(key: "weibo", name: "微博", node: "KqndgxeLl9"),
-        .init(key: "douyin", name: "抖音", node: "K7GdaMgdQy"),
         .init(key: "xiaohongshu", name: "小红书", node: "L4MdA5ldxD"),
     ]
 
