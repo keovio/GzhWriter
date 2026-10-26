@@ -1,4 +1,4 @@
-name: Build Mac + Windows
+name: Build Mac + Windows + Linux
 
 on:
   push:
@@ -111,8 +111,37 @@ jobs:
           name: win
           path: windows/dist/*.exe
 
+  linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build AppImage + deb
+        run: |
+          set -o pipefail
+          npm install --no-audit --no-fund
+          npm run dist:linux 2>&1 | tee ../build.log
+      - name: Report build errors
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; tail -80 ../build.log 2>/dev/null; echo '```'; } > report.md
+          gh issue create -R ${{ github.repository }} --title "Linux 构建失败 #${{ github.run_number }}" --body-file report.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            windows/dist/*.AppImage
+            windows/dist/*.deb
+
   release:
-    needs: [mac, win]
+    needs: [mac, win, linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -129,6 +158,7 @@ jobs:
           gh release create "$TAG" out/* -R ${{ github.repository }} --target ${{ github.sha }} \
             --title "GzhWriter $TAG" --latest \
             --notes "Mac：下载 GzhWriter.zip，解压后把 GzhWriter.app 拖进「应用程序」；首次打开若被拦截，在终端运行 xattr -cr /Applications/GzhWriter.app。
+          Linux：.AppImage 加执行权限后双击运行（chmod +x）；Debian/Ubuntu 也可装 .deb。
           Windows：GzhWriter-Setup 是安装版，GzhWriter-Portable 是免安装版；首次打开若被拦截，点「更多信息 → 仍要运行」。"
           # 只留最新这一个
           gh release list -R ${{ github.repository }} --limit 50 --json tagName -q '.[].tagName' | grep -vx "$TAG" | while read t; do
