@@ -37,6 +37,13 @@ enum Prompts {
         """)]
     }
 
+    static func materialsBlock(_ mats: [Material]) -> String {
+        if mats.isEmpty { return "" }
+        var t = "作者自己的真实素材（来自作者本人）。适合这部分的就自然用上，可以换说法但不改事实；不合适就不用；不要另外编造作者的经历：\n"
+        for m in mats { t += "· [\(m.kind)] \(m.text.prefix(400))\n" }
+        return t
+    }
+
     static func kindBlock(_ a: Article) -> String {
         let k = ArticleKind.of(a.kind)
         if k != .auto { return "文章类型：\(k.name)。\(k.outlineRule)" }
@@ -62,7 +69,7 @@ enum Prompts {
         """)]
     }
 
-    static func outline(_ a: Article, style: StylePreset?, ref: Breakdown? = nil) -> [ChatMessage] {
+    static func outline(_ a: Article, style: StylePreset?, ref: Breakdown? = nil, mats: [Material] = []) -> [ChatMessage] {
         [.system(base), .user("""
         选题：\(a.topic)
         作者的观点 / 想说的话：\(a.viewpoint)
@@ -71,13 +78,14 @@ enum Prompts {
 
         \(kindBlock(a))
         \(ref.map { $0.guide + "大纲结构尽量贴近上面的参考结构。" } ?? "")
+        \(materialsBlock(mats))
         围绕作者的观点出一份公众号文章大纲，每部分一行，格式「小标题：这部分要讲的要点」。
         再给一个不标题党的文章标题。
         只输出 JSON：{"title":"文章标题","kind":"\(ArticleKind.of(a.kind) == .auto ? "所选类型英文代号" : a.kind)","outline":["小标题：要点", "..."]}
         """)]
     }
 
-    static func section(_ a: Article, index: Int, style: StylePreset?, words: Int = 400, ref: Breakdown? = nil) -> [ChatMessage] {
+    static func section(_ a: Article, index: Int, style: StylePreset?, words: Int = 400, ref: Breakdown? = nil, mats: [Material] = []) -> [ChatMessage] {
         let all = a.outline.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         let done = a.sections.prefix(index).map { "· \($0.heading)：\($0.body.prefix(80))…" }.joined(separator: "\n")
         return [.system(base + styleBlock(style)), .user("""
@@ -89,6 +97,7 @@ enum Prompts {
         \(all)
 
         \(done.isEmpty ? "" : "前面已经写好的部分（保持衔接，不要重复）：\n\(done)\n")
+        \(materialsBlock(mats))
         现在只写第 \(index + 1) 部分：\(a.outline[index])
         \(ArticleKind.of(a.kind).writeRule)
         \(ref.map { $0.guide + (index == 0 ? "这是第一部分，用上面的开头手法。" : (index == a.outline.count - 1 ? "这是最后一部分，用上面的结尾手法。" : "")) } ?? "")
