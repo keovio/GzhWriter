@@ -118,15 +118,17 @@ struct DistributeCard: View {
                 ForEach(v.tags, id: \.self) { Chip(text: "#\($0)") }
             }
             HStack(spacing: 10) {
-                copyButton("复制正文", key: "b", primary: true) { Publisher.copyPlatform(a, v) }
+                copyButton("复制正文", key: "b") { Publisher.copyPlatform(a, v) }
                 if !v.tags.isEmpty { copyButton("复制标签", key: "g") { Publisher.copyText(v.tags.joined(separator: " ")) } }
                 if !a.cover.isEmpty { Button("封面图") { ImageStore.reveal(articleId) }.buttonStyle(GhostButton()) }
                 Spacer()
-                Button("打开\(platform == "toutiao" ? "头条号" : "百家号")后台") {
-                    let s = platform == "toutiao" ? "https://mp.toutiao.com/profile_v4/graphic/publish" : "https://baijiahao.baidu.com/builder/rc/edit?type=news"
-                    if let u = URL(string: s) { NSWorkspace.shared.open(u) }
+                Button {
+                    PlatformFill.open(store: store, articleId: articleId, platform: platform)
+                } label: {
+                    HStack(spacing: 4) { Image(systemName: "square.and.pencil"); Text("打开\(platform == "toutiao" ? "头条号" : "百家号")并自动填入") }
                 }
-                .buttonStyle(LinkButton())
+                .buttonStyle(PrimaryButton())
+                .help("在 app 里打开发文页，自动填标题和正文；发布按钮你自己点")
             }
             .padding(.top, 2)
         }
