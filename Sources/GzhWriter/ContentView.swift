@@ -42,7 +42,7 @@ struct ContentView: View {
         .ignoresSafeArea()
         .preferredColorScheme(.light)
         .onReceive(NotificationCenter.default.publisher(for: .newArticle)) { _ in newArticle() }
-        .onAppear { if store.data.connections.isEmpty { pane = .models } }
+        .onAppear { if store.data.connections.isEmpty && ProcessInfo.processInfo.environment["GZH_PANE"] == nil { pane = .models } }
     }
 
     var detail: some View {
