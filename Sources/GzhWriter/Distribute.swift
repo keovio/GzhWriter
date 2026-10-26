@@ -207,19 +207,17 @@ struct DistributeCard: View {
                 if !a.cover.isEmpty { Button("封面图") { ImageStore.reveal(articleId) }.buttonStyle(GhostButton()) }
                 Button("重写") { runVariants([p]) }.buttonStyle(LinkButton()).disabled(busy.label != nil)
                 Spacer()
-                Button {
-                    store.update(articleId) {
-                        let now = !($0.variants[p.rawValue]?.posted ?? false)
-                        $0.variants[p.rawValue, default: PlatformVariant()].posted = now
-                        $0.variants[p.rawValue, default: PlatformVariant()].postedAt = now ? Date() : nil
-                    }
-                } label: {
+                PostedToggle(articleId: articleId, platform: p.rawValue) {
                     HStack(spacing: 4) {
                         Image(systemName: v.posted ? "checkmark.circle.fill" : "circle")
-                        Text(v.posted ? "已发" : "我发了")
+                        Text(postedText(p))
                     }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(v.posted ? Theme.green : Theme.ink)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rule))
                 }
-                .buttonStyle(GhostButton())
                 if p.fillable {
                     let accs = store.accounts(on: p.rawValue)
                     if accs.count > 1 {
@@ -278,6 +276,13 @@ struct DistributeCard: View {
         let n = a.sections.filter { !$0.image.isEmpty }.count
         if a.cover.isEmpty { return ImageGen.connection(store) == nil ? "没接智谱，只能生成文字封面" : "还没配图" }
         return n == 0 ? "有封面，正文没配图" : "封面 + 正文 \(n) 张"
+    }
+
+    func postedText(_ p: Platform) -> String {
+        let accs = store.accounts(on: p.rawValue)
+        guard accs.count > 1 else { return a.variants[p.rawValue]?.posted == true ? "已发" : "我发了" }
+        let n = accs.filter { store.isPosted(a, $0) }.count
+        return n == 0 ? "我发了" : "已发 \(n)/\(accs.count) 个号"
     }
 
     var wechatStatus: String {
