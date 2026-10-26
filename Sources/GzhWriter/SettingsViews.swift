@@ -149,17 +149,7 @@ struct ModelsView: View {
                 if let id = selected, store.data.connections.contains(where: { $0.id == id }) {
                     ConnectionEditor(connId: id, onDelete: { selected = store.data.connections.first?.id }).id(id)
                 }
-                if store.data.connections.count > 1 {
-                    RolesEditor()
-                } else if let c = store.data.connections.first {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.green)
-                        Text("选题、写正文、审稿都用「\(c.name)」（\(c.model)）").font(.system(size: 13)).foregroundStyle(Theme.ink)
-                        Spacer()
-                        Text("再接一个模型，就能分开用、出错自动换").font(.system(size: 12)).foregroundStyle(Theme.faint)
-                    }
-                    .card(padding: 16)
-                }
+                RolesEditor()
             }
         }
         .onAppear { if selected == nil { selected = store.data.connections.first?.id } }
@@ -213,7 +203,7 @@ struct ConnectionEditor: View {
                     .onSubmit { Keychain.set(key, for: connId.uuidString) }
             }
             Divider()
-            SettingRow(label: "模型", hint: "点「获取列表」后可以直接选") {
+            SettingRow(label: "默认模型", hint: "每一步用哪个，在下面「角色分工」里换") {
                 HStack(spacing: 8) {
                     TextField("模型名", text: field(\.model)).fieldBox()
                     if !models.isEmpty {
@@ -269,38 +259,28 @@ struct ConnectionEditor: View {
 
 struct RolesEditor: View {
     @EnvironmentObject var store: Store
+    @State private var lists: [UUID: [String]] = [:]
+
+    var single: Bool { store.data.connections.count == 1 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionTitle(text: "角色分工", hint: "按顺序用，第一个出错（限流、余额不足、宕机）自动换下一个")
+            SectionTitle(text: "角色分工", hint: single ? "同一个平台，每一步可以用不同的模型" : "每一步选平台和模型；排第一的出错（限流、余额不足）自动换下一个")
                 .padding(.bottom, 6)
             ForEach(Array(Role.allCases.enumerated()), id: \.element) { n, role in
                 if n > 0 { Divider() }
-                let ids = store.data.roles[role.rawValue] ?? []
-                SettingRow(label: role.title, hint: "用于：" + role.uses + (ids.isEmpty ? "。没选就按连接顺序" : "")) {
+                let ids = picked(role)
+                SettingRow(label: role.title, hint: "用于：" + role.uses) {
                     HStack(spacing: 6) {
                         ForEach(Array(ids.enumerated()), id: \.element) { i, id in
                             if let c = store.data.connections.first(where: { $0.id == id }) {
-                                HStack(spacing: 4) {
-                                    Text("\(i + 1)").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.blue)
-                                    Text(c.name).font(.system(size: 12))
-                                    Text(c.model).font(.system(size: 11)).foregroundStyle(Theme.sub)
-                                    if i > 0 {
-                                        Button { move(role, i, -1) } label: { Image(systemName: "arrow.left").font(.system(size: 9)) }
-                                            .buttonStyle(RowButton())
-                                    }
-                                    Button { remove(role, id) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
-                                        .buttonStyle(RowButton())
-                                }
-                                .foregroundStyle(Theme.ink)
-                                .padding(.horizontal, 9).padding(.vertical, 4)
-                                .background(Theme.blueBg, in: Capsule())
+                                chip(role, c, i, ids.count)
                             }
                         }
                         let rest = store.data.connections.filter { !ids.contains($0.id) }
                         if !rest.isEmpty {
                             Menu {
-                                ForEach(rest) { c in Button(c.name) { addTo(role, c.id) } }
+                                ForEach(rest) { c in Button("备用：\(c.name)") { addTo(role, c.id) } }
                             } label: { Image(systemName: "plus") }
                             .menuStyle(.borderlessButton)
                             .fixedSize()
@@ -310,12 +290,55 @@ struct RolesEditor: View {
             }
         }
         .card()
+        .task {
+            for c in store.data.connections where lists[c.id] == nil {
+                let key = Keychain.get(c.id.uuidString) ?? ""
+                if let l = try? await LLM.listModels(baseURL: c.baseURL, key: key) { lists[c.id] = l }
+            }
+        }
     }
 
-    func addTo(_ r: Role, _ id: UUID) { store.data.roles[r.rawValue, default: []].append(id); store.save() }
-    func remove(_ r: Role, _ id: UUID) { store.data.roles[r.rawValue]?.removeAll { $0 == id }; store.save() }
+    func chip(_ role: Role, _ c: ModelConnection, _ i: Int, _ count: Int) -> some View {
+        let k = "\(role.rawValue).\(c.id.uuidString)"
+        let current = store.data.roleModels[k].flatMap { $0.isEmpty ? nil : $0 } ?? c.model
+        var options = lists[c.id] ?? []
+        if !options.contains(c.model) { options.insert(c.model, at: 0) }
+        if !options.contains(current) { options.insert(current, at: 0) }
+        return HStack(spacing: 6) {
+            if count > 1 { Text("\(i + 1)").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.blue) }
+            Text(c.name).font(.system(size: 12)).foregroundStyle(Theme.sub)
+            Menu {
+                ForEach(options, id: \.self) { m in
+                    Button(m == current ? "✓ \(m)" : m) { store.data.roleModels[k] = m; store.save() }
+                }
+            } label: {
+                Text(current).font(.system(size: 12, weight: .semibold))
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            if count > 1 {
+                if i > 0 {
+                    Button { move(role, i, -1) } label: { Image(systemName: "arrow.left").font(.system(size: 9)) }
+                        .buttonStyle(RowButton())
+                }
+                Button { remove(role, c.id) } label: { Image(systemName: "xmark").font(.system(size: 9)) }
+                    .buttonStyle(RowButton())
+            }
+        }
+        .foregroundStyle(Theme.ink)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(Theme.blueBg, in: Capsule())
+    }
+
+    /// 没手动排过的角色，按连接顺序全部用上
+    func picked(_ r: Role) -> [UUID] {
+        let ids = (store.data.roles[r.rawValue] ?? []).filter { id in store.data.connections.contains { $0.id == id } }
+        return ids.isEmpty ? store.data.connections.map(\.id) : ids
+    }
+    func addTo(_ r: Role, _ id: UUID) { store.data.roles[r.rawValue] = picked(r) + [id]; store.save() }
+    func remove(_ r: Role, _ id: UUID) { store.data.roles[r.rawValue] = picked(r).filter { $0 != id }; store.save() }
     func move(_ r: Role, _ i: Int, _ d: Int) {
-        guard var list = store.data.roles[r.rawValue], i + d >= 0, i + d < list.count else { return }
+        var list = picked(r)
+        guard i + d >= 0, i + d < list.count else { return }
         list.swapAt(i, i + d)
         store.data.roles[r.rawValue] = list; store.save()
     }
