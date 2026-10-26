@@ -30,13 +30,13 @@ struct WorkbenchView: View {
             PageHeader(title: greeting, subtitle: store.data.connections.isEmpty
                        ? "先到「设置 → 模型」接一个模型，就能开始一键成稿。"
                        : "看看今天写到哪了。") {
-                if pipeline.queued > 0 || !pipeline.running.isEmpty {
-                    Chip(text: "后台在写 \(pipeline.running.count + pipeline.queued) 篇", fg: Theme.blue, bg: Theme.blueBg)
+                if pipeline.active > 0 {
+                    Chip(text: "正在写 \(pipeline.active) 篇", fg: Theme.blue, bg: Theme.blueBg)
                 }
             }
             stats
             composer
-            if !pipeline.running.isEmpty || pipeline.queued > 0 { runningCard }
+            if !pipeline.running.isEmpty { runningCard }
             if !pipeline.failedArticles.isEmpty { failedCard }
             HStack(alignment: .top, spacing: 20) {
                 recent.frame(maxWidth: .infinity)
@@ -108,10 +108,17 @@ struct WorkbenchView: View {
                         let p = Platform.of(acc.platform)
                         Button { accountId = acc.id } label: {
                             HStack(spacing: 5) {
-                                Text(p?.name ?? "").font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(on ? Color.white.opacity(0.85) : (p?.color ?? Theme.sub))
+                                Circle().fill(on ? Color.white : (p?.color ?? Theme.sub)).frame(width: 7, height: 7)
+                                if let pn = p?.name, !acc.name.contains(pn) {
+                                    Text(pn).font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(on ? Color.white.opacity(0.85) : (p?.color ?? Theme.sub))
+                                }
                                 Text(acc.name).font(.system(size: 12, weight: on ? .semibold : .regular))
                                     .foregroundStyle(on ? Color.white : Theme.ink)
+                                if store.data.styles.count > 1, let st = store.style(acc.styleId) {
+                                    Text("· " + st.name).font(.system(size: 11))
+                                        .foregroundStyle(on ? Color.white.opacity(0.7) : Theme.faint)
+                                }
                             }
                             .fixedSize()
                             .padding(.horizontal, 12).padding(.vertical, 6)
@@ -159,7 +166,7 @@ struct WorkbenchView: View {
                     .font(.system(size: 12)).foregroundStyle(Theme.faint)
                 Spacer()
                 Button(action: go) {
-                    HStack(spacing: 6) { Image(systemName: "sparkles"); Text("开始生产") }
+                    HStack(spacing: 6) { Image(systemName: "sparkles"); Text(count > 1 ? "开始写 \(count) 篇" : "开始写") }
                 }
                 .buttonStyle(PrimaryButton(large: true))
                 .disabled(store.data.connections.isEmpty)
@@ -196,10 +203,9 @@ struct WorkbenchView: View {
     var runningCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                SectionTitle(text: "正在生产")
-                if pipeline.queued > 0 { Chip(text: "排队 \(pipeline.queued)") }
+                SectionTitle(text: "正在写", hint: "点开能看到每一步")
             }
-            ForEach(Array(pipeline.running.keys), id: \.self) { id in
+            ForEach(store.data.articles.filter { pipeline.running[$0.id] != nil }.map(\.id), id: \.self) { id in
                 Button { open(id) } label: {
                     RunLog(articleId: id, compact: true).contentShape(Rectangle())
                 }
@@ -248,7 +254,7 @@ struct WorkbenchView: View {
             if store.data.articles.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "doc.text").font(.system(size: 26)).foregroundStyle(Theme.faint)
-                    Text("还没有稿件，点上面「开始生产」写第一篇").font(.system(size: 13)).foregroundStyle(Theme.sub)
+                    Text("还没有稿件，点上面「开始写」写第一篇").font(.system(size: 13)).foregroundStyle(Theme.sub)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 30)
             } else {
@@ -319,6 +325,7 @@ struct HotRow: View {
 }
 
 struct ArticleRow: View {
+    @EnvironmentObject var store: Store
     let article: Article
     let running: String?
     let action: () -> Void
@@ -355,7 +362,13 @@ struct ArticleRow: View {
         .onHover { hover = $0 }
     }
 
-    /// 每个平台一个小点：灰=没版本，浅色=有版本没发，实心=发了
+    /// 这个平台有没有号存过草稿
+    func drafted(_ platform: String) -> Bool {
+        store.accounts(on: platform).contains { article.drafts[$0.id.uuidString] != nil }
+            || (platform == "wechat" && !article.wechatDraft.isEmpty)
+    }
+
+    /// 每个平台一个小点：浅色=有版本，空心圈=存了草稿，实心=发了
     var platformDots: some View {
         let keys = ["wechat"] + Platform.allCases.filter { $0 != .wechat }.map(\.rawValue)
         return HStack(spacing: 3) {
@@ -363,9 +376,12 @@ struct ArticleRow: View {
                 let p = Platform.of(k)!
                 let has = k == "wechat" ? article.stage == .layout : article.variants[k] != nil
                 let done = k == "wechat" ? article.published : (article.variants[k]?.posted ?? false)
-                if has {
-                    Circle().fill(done ? p.color : p.color.opacity(0.25)).frame(width: 7, height: 7)
-                        .help(p.name + (done ? "已发" : "未发"))
+                let dr = !done && drafted(k)
+                if has || dr {
+                    Circle().fill(done ? p.color : p.color.opacity(dr ? 0.1 : 0.25))
+                        .overlay(Circle().stroke(dr ? p.color : Color.clear, lineWidth: 1.5))
+                        .frame(width: 7, height: 7)
+                        .help(p.name + (done ? "已发" : dr ? "已存草稿，还没发" : "未发"))
                 }
             }
         }
@@ -373,7 +389,8 @@ struct ArticleRow: View {
 
     var statusText: String {
         switch article.stage {
-        case .layout: return "已完成，待发布"
+        case .layout:
+            return article.drafts.isEmpty && article.wechatDraft.isEmpty ? "已完成，待发布" : "已存草稿，待你去平台发布"
         case .review: return "待审稿"
         default: return "写作中 · \(article.stage.name)"
         }
