@@ -203,6 +203,7 @@ function createWindow() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  if (process.env.GZH_SHOTS) win.setBounds({ x: 0, y: 0, width: 1320, height: 860 })
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
 }
 
