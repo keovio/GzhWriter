@@ -108,12 +108,16 @@ struct Article: Identifiable, Codable, Hashable {
     var variants: [String: PlatformVariant] = [:]   // "toutiao" / "baijiahao"
     var titleOptions: [TitleOption] = []            // 标题多选
     var refId: UUID?                                // 参考的爆文拆解
+    var materialIds: [UUID] = []                    // 用上的素材
+    var scheduled: Date?                            // 计划发布时间
+    var reminded = false
+    var published = false
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -143,6 +147,10 @@ struct Article: Identifiable, Codable, Hashable {
         variants = (try? c.decode([String: PlatformVariant].self, forKey: .variants)) ?? [:]
         titleOptions = (try? c.decode([TitleOption].self, forKey: .titleOptions)) ?? []
         refId = try? c.decodeIfPresent(UUID.self, forKey: .refId)
+        materialIds = (try? c.decode([UUID].self, forKey: .materialIds)) ?? []
+        scheduled = try? c.decodeIfPresent(Date.self, forKey: .scheduled)
+        reminded = (try? c.decode(Bool.self, forKey: .reminded)) ?? false
+        published = (try? c.decode(Bool.self, forKey: .published)) ?? false
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
@@ -220,8 +228,13 @@ struct AutoSettings: Codable, Hashable {
     var variants = true         // 自动出头条号、百家号版本
     var autoTitle = true        // 自动出 5 个标题并换上最高分的
     var autoCompliance = true   // 自动改掉敏感词
+    var useMaterials = true     // 写稿时自动用上素材库里相关的素材
+    var autoSchedule = true     // 写好自动排进发布日历
+    var publishDays: [Int] = [2, 4, 6]   // 1=周日 … 7=周六
+    var publishHour = 20
+    var publishMinute = 0
 
-    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance }
+    enum CodingKeys: String, CodingKey { case passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance, useMaterials, autoSchedule, publishDays, publishHour, publishMinute }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -241,6 +254,11 @@ struct AutoSettings: Codable, Hashable {
         variants = (try? c.decode(Bool.self, forKey: .variants)) ?? d.variants
         autoTitle = (try? c.decode(Bool.self, forKey: .autoTitle)) ?? d.autoTitle
         autoCompliance = (try? c.decode(Bool.self, forKey: .autoCompliance)) ?? d.autoCompliance
+        useMaterials = (try? c.decode(Bool.self, forKey: .useMaterials)) ?? d.useMaterials
+        autoSchedule = (try? c.decode(Bool.self, forKey: .autoSchedule)) ?? d.autoSchedule
+        publishDays = (try? c.decode([Int].self, forKey: .publishDays)) ?? d.publishDays
+        publishHour = (try? c.decode(Int.self, forKey: .publishHour)) ?? d.publishHour
+        publishMinute = (try? c.decode(Int.self, forKey: .publishMinute)) ?? d.publishMinute
     }
 }
 
@@ -274,8 +292,9 @@ struct AppData: Codable {
     var auto = AutoSettings()
     var wechat = WechatSettings()
     var breakdowns: [Breakdown] = []
+    var materials: [Material] = []
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -287,6 +306,7 @@ struct AppData: Codable {
         auto = (try? c.decode(AutoSettings.self, forKey: .auto)) ?? AutoSettings()
         wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
         breakdowns = (try? c.decode([Breakdown].self, forKey: .breakdowns)) ?? []
+        materials = (try? c.decode([Material].self, forKey: .materials)) ?? []
     }
 }
 
@@ -440,5 +460,32 @@ struct Breakdown: Identifiable, Codable, Hashable {
         if !techniques.isEmpty { t += "· 技巧：" + techniques.joined(separator: "；") + "\n" }
         if !ending.isEmpty { t += "· 结尾手法：\(ending)\n" }
         return t
+    }
+}
+
+
+/// 素材库：作者自己的经历、观点、金句、数据、案例
+struct Material: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var kind = "经历"
+    var text = ""
+    var tags: [String] = []
+    var uses = 0
+    var created = Date()
+
+    static let kinds = ["经历", "观点", "金句", "数据", "案例"]
+
+    enum CodingKeys: String, CodingKey { case id, kind, text, tags, uses, created }
+    init(kind: String = "经历", text: String = "", tags: [String] = []) {
+        self.kind = kind; self.text = text; self.tags = tags
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        kind = (try? c.decode(String.self, forKey: .kind)) ?? "经历"
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        tags = (try? c.decode([String].self, forKey: .tags)) ?? []
+        uses = (try? c.decode(Int.self, forKey: .uses)) ?? 0
+        created = (try? c.decode(Date.self, forKey: .created)) ?? Date()
     }
 }
