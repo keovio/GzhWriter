@@ -151,6 +151,9 @@ final class Pipeline: ObservableObject {
                 if hot.isEmpty || (hotLoadedAt.map { Date().timeIntervalSince($0) > 3600 } ?? true) { await refreshHot() }
                 hotTitles = hot.map(\.title)
             }
+            if settings.hotForTopic {
+                hotTitles = HotRadar.titlesForTopic(store) + hotTitles
+            }
             let existing = Dedupe.history(store, except: id)
             var rejected: [String] = []
             var t = try await store.runJSON(.topic, TopicReply.self,
