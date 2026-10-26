@@ -35,6 +35,16 @@ enum Platform: String, CaseIterable, Identifiable {
     var isLongForm: Bool { self == .toutiao || self == .baijiahao || self == .zhihu }
 
     /// 能在 app 里打开发文页自动填入
+    /// 这个平台怎么发
+    var howTo: String {
+        switch self {
+        case .wechat: return "官方接口存进草稿箱，你在后台点发表"
+        case .toutiao, .baijiahao, .zhihu: return "打开发文页自动填好标题正文，你点发布"
+        case .xiaohongshu: return "打开发布页填好文字，图片你传，你点发布"
+        case .weibo: return "一键复制，打开微博粘贴发布"
+        }
+    }
+
     var fillable: Bool { self != .wechat && self != .weibo }
 
     var publishURL: URL {
