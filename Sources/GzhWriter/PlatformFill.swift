@@ -92,8 +92,9 @@ enum PlatformFill {
     /// 能后台存草稿的平台（小红书要先传图、微博没有草稿箱）
     static func draftable(_ p: Platform) -> Bool { p == .toutiao || p == .baijiahao || p == .zhihu }
 
-    /// 后台打开发文页，填好后存草稿。成功返回提示，失败抛错。发布永远是作者自己点。
-    static func saveDraft(store: Store, articleId: UUID, account acc: Account) async throws -> String {
+    /// 打开发文页（看得见的窗口），填好后点存草稿。发布永远是作者自己点。
+    /// closeWhenDone：批量时存好自动关窗口接着下一篇；单篇存好后窗口留着，可以直接检查、发布。
+    static func saveDraft(store: Store, articleId: UUID, account acc: Account, closeWhenDone: Bool = false) async throws -> String {
         guard let p = Platform.of(acc.platform), draftable(p) else { throw DraftError.msg("这个平台不支持存草稿") }
         guard await isLoggedIn(acc) else { throw DraftError.msg("「\(acc.name)」还没登录\(p.name)，先在「我的账号」点登录") }
         if store.article(articleId)?.variants[p.rawValue] == nil {
@@ -103,30 +104,51 @@ enum PlatformFill {
         let model = FillModel(article: a, variant: v, platform: p.rawValue)
         model.dataStore = dataStore(acc)
         model.autoDraft = true
-        let host = NSHostingView(rootView: FillWeb(model: model))
-        // 屏幕外的窗口：不打扰，但网页照常跑
-        let w = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 1280, height: 860),
-                         styleMask: [.borderless], backing: .buffered, defer: false)
+        model.status = "正在打开\(p.name)「\(acc.name)」的发文页，自动填好后存草稿…"
+        let host = NSHostingView(rootView: FillView(model: model))
+        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 860),
+                         styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
+        w.title = "存草稿 · \(p.name)「\(acc.name)」 · " + (v.title.isEmpty ? a.displayTitle : v.title)
         w.contentView = host
         w.isReleasedWhenClosed = false
-        w.alphaValue = 0
-        w.ignoresMouseEvents = true
-        w.orderFrontRegardless()
-        defer { w.orderOut(nil); w.contentView = nil }
-        return try await withCheckedThrowingContinuation { c in
+        w.center()
+        w.makeKeyAndOrderFront(nil)
+        windows.append(w)
+        let flag = CloseFlag()
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+            flag.closed = true
+            Task { @MainActor in
+                windows.removeAll { $0 === w }
+                model.onDone?(.failure(DraftError.msg("窗口被关掉了，没存上")))
+            }
+        }
+        let result: Result<String, Error> = await withCheckedContinuation { c in
             var resumed = false
             model.onDone = { r in
                 guard !resumed else { return }
                 resumed = true
-                switch r {
-                case .success(let m): c.resume(returning: m)
-                case .failure(let e): c.resume(throwing: e)
-                }
+                c.resume(returning: r)
             }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 90_000_000_000)
-                model.onDone?(.failure(DraftError.msg(model.filled ? "填好了但没找到存草稿按钮" : "90 秒没打开编辑器，可能登录过期了")))
+                model.onDone?(.failure(DraftError.msg(model.filled ? "填好了但没找到存草稿按钮，可以在窗口里自己点" : "90 秒没打开编辑器，可能登录过期了")))
             }
+        }
+        let closedByUser = flag.closed
+        switch result {
+        case .success(let m):
+            store.markDrafted(articleId, acc)
+            model.done = true
+            model.status = "✓ \(m)。可以在这里检查、设封面，满意了自己点「发布」；不发就直接关掉。"
+            Theme.tap()
+            if closeWhenDone && !closedByUser {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                w.close()
+            }
+            return m
+        case .failure(let e):
+            if !closedByUser { model.status = "没存上：\(e.localizedDescription)" }
+            throw e
         }
     }
 
@@ -152,6 +174,43 @@ enum PlatformFill {
       if (/(草稿已保存|已保存|保存成功|自动保存)/.test(txt)) return 'saved';
       return 'none';
     })()
+    """
+
+    /// 读当前登录号的昵称：先试平台自己的接口，再从页面上找。读不到返回空
+    static let nicknameScript = """
+    const prefer = ['screen_name', 'media_name', 'nickname', 'nick_name', 'uname', 'user_name', 'name'];
+    function pick(o, depth) {
+      if (!o || typeof o !== 'object' || depth > 5) return '';
+      for (const k of prefer) {
+        const v = o[k];
+        if (typeof v === 'string' && v.trim() && v.length <= 30) return v.trim();
+      }
+      for (const k in o) { const r = pick(o[k], depth + 1); if (r) return r; }
+      return '';
+    }
+    const h = location.hostname;
+    let urls = [];
+    if (h.includes('toutiao.com')) urls = ['/mp/agw/media/get_media_info', '/passport/account/info/v2/'];
+    else if (h.includes('baidu.com')) urls = ['/builder/app/appinfo'];
+    else if (h.includes('zhihu.com')) urls = ['/api/v4/me', 'https://www.zhihu.com/api/v4/me'];
+    else if (h.includes('xiaohongshu.com')) urls = ['/api/galaxy/user/info', '/api/sns/web/v2/user/me'];
+    else if (h.includes('weibo.com')) urls = ['/ajax/side/cards?count=1'];
+    for (const u of urls) {
+      try {
+        const r = await fetch(u, { credentials: 'include' });
+        if (!r.ok) continue;
+        const j = await r.json();
+        const d = j.data || j.user || j;
+        const n = pick(d.user || d.media || d.user_info || d, 0);
+        if (n) return n;
+      } catch (e) {}
+    }
+    const sel = '[class*="user-name"],[class*="userName"],[class*="nickname"],[class*="nick-name"],[class*="media-name"],[class*="account-name"]';
+    for (const e of document.querySelectorAll(sel)) {
+      const t = (e.innerText || '').trim();
+      if (t && t.length <= 30 && !/登录|注册/.test(t)) return t;
+    }
+    return '';
     """
 
     /// 正文 HTML：配图转成 data URI 内嵌
@@ -258,6 +317,7 @@ final class FillModel: ObservableObject {
         platform == "xiaohongshu" ? "小红书要先上传图片才会出现标题和正文框：点「复制封面」粘进去，或上传你自己的图。" : ""
     }
     @Published var filled = false
+    @Published var done = false
     var dataStore: WKWebsiteDataStore = .default()
     var autoDraft = false
     var onDone: ((Result<String, Error>) -> Void)?
@@ -298,8 +358,13 @@ final class FillModel: ObservableObject {
                 if r == "ok" {
                     self.filled = true
                     self.timer?.invalidate()
-                    self.status = "已填好标题和正文。检查一遍、设封面和标签，再自己点「发布」。"
-                    if self.autoDraft { self.saveDraftSoon() } else { Theme.tap() }
+                    if self.autoDraft {
+                        self.status = "已填好标题和正文，正在存草稿…"
+                        self.saveDraftSoon()
+                    } else {
+                        self.status = "已填好标题和正文。检查一遍、设封面和标签，再自己点「发布」。"
+                        Theme.tap()
+                    }
                 } else if !auto {
                     self.status = error != nil ? "填入出错：\(error!.localizedDescription)" : "还没找到编辑器，先登录并进入发文页。"
                 }
@@ -352,6 +417,8 @@ extension FillModel {
     }
 }
 
+final class CloseFlag: @unchecked Sendable { var closed = false }
+
 enum DraftError: LocalizedError {
     case msg(String)
     var errorDescription: String? { if case .msg(let s) = self { return s }; return nil }
@@ -368,7 +435,10 @@ final class LoginModel: ObservableObject {
     let account: Account
     let dataStore: WKWebsiteDataStore
     weak var window: NSWindow?
+    weak var web: WKWebView?
     @Published var loggedIn = false
+    @Published var nickname = ""
+    private var nickTries = 0
     private var timer: Timer?
 
     init(account: Account, store: WKWebsiteDataStore) {
@@ -388,6 +458,19 @@ final class LoginModel: ObservableObject {
             Theme.tap()
             NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
         } else if !ok { loggedIn = false }
+        if loggedIn && nickname.isEmpty && nickTries < 8 { await readNickname() }
+    }
+
+    /// 登录后读平台上的昵称，拿来当账号名（只替换默认名）
+    func readNickname() async {
+        guard let web else { return }
+        nickTries += 1
+        let r = try? await web.callAsyncJavaScript(PlatformFill.nicknameScript, arguments: [:], in: nil, contentWorld: .page)
+        let n = (r as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        nickname = n
+        Store.shared?.adoptNickname(account.id, n)
+        NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
     }
 
     func stop() { timer?.invalidate() }
@@ -412,7 +495,7 @@ struct LoginView: View {
             HStack(spacing: 10) {
                 Image(systemName: model.loggedIn ? "checkmark.circle.fill" : "person.crop.circle.badge.questionmark")
                     .foregroundStyle(model.loggedIn ? Theme.green : Theme.navy)
-                Text(model.loggedIn ? "已登录，会一直记住。以后填稿、存草稿都不用再登。" : "在下面登录（扫码或密码都行），登录成功这里会变绿。")
+                Text(model.loggedIn ? (model.nickname.isEmpty ? "已登录" : "已登录「\(model.nickname)」") + "，会一直记住。以后填稿、存草稿都不用再登。" : "在下面登录（扫码或密码都行），登录成功这里会变绿。")
                     .font(.system(size: 12)).foregroundStyle(Theme.ink)
                 Spacer()
                 if model.loggedIn {
@@ -455,6 +538,7 @@ struct LoginWeb: NSViewRepresentable {
         v.navigationDelegate = context.coordinator
         v.uiDelegate = context.coordinator
         v.allowsBackForwardNavigationGestures = true
+        model.web = v
         let p = Platform.of(model.account.platform) ?? .toutiao
         v.load(URLRequest(url: p == .weibo ? URL(string: "https://weibo.com/login.php")! : p.publishURL))
         return v
