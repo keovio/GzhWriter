@@ -87,11 +87,13 @@ final class Busy: ObservableObject {
 
 struct BusyBar: View {
     @ObservedObject var busy: Busy
+    @EnvironmentObject var store: Store
     var body: some View {
         if let l = busy.label {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text(l).foregroundStyle(.secondary)
+                if let m = store.calling { ModelTag(text: m) }
             }
             .padding(.vertical, 4)
         }
@@ -106,4 +108,28 @@ struct BusyBar: View {
             .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
         }
     }
+}
+
+
+/// 小标签：显示用的是哪个模型
+struct ModelTag: View {
+    var text: String
+    var prefix = "模型"
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "cpu").font(.system(size: 10))
+            Text("\(prefix)：\(text)").font(.system(size: 11)).lineLimit(1)
+        }
+        .foregroundStyle(Theme.sub)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Theme.bg, in: Capsule())
+        .fixedSize()
+    }
+}
+
+/// 显示某个用途会用哪个模型
+struct RoleModelTag: View {
+    @EnvironmentObject var store: Store
+    let role: Role
+    var body: some View { ModelTag(text: store.modelLabel(role), prefix: role.title + "用") }
 }
