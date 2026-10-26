@@ -5,6 +5,7 @@ import SwiftUI
 struct DistributeCard: View {
     @EnvironmentObject var store: Store
     let articleId: UUID
+    var only: Platform? = nil          // 直接写的小红书/微博：只显示这一个平台
     @StateObject private var busy = Busy()
     @State private var platform = "toutiao"
     @State private var copiedKey = ""
@@ -14,11 +15,12 @@ struct DistributeCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                SectionTitle(text: "配图与多平台分发", hint: "都只是准备好，发不发由你")
+                SectionTitle(text: only.map { "\($0.name)正文" } ?? "配图与多平台分发", hint: only == nil ? "都只是准备好，发不发由你" : "改好了复制或打开平台，发布你自己点")
                 Spacer()
             }
             BusyBar(busy: busy)
 
+            if only == nil {
             // 配图
             HStack(spacing: 12) {
                 coverThumb
@@ -63,9 +65,11 @@ struct DistributeCard: View {
             }
             .padding(14)
             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
+            }
 
             // 其他平台
             VStack(alignment: .leading, spacing: 10) {
+                if only == nil {
                 HStack(spacing: 6) {
                     ForEach(Platform.others(store)) { p in platformChip(p) }
                     Spacer()
@@ -73,6 +77,7 @@ struct DistributeCard: View {
                         Button(a.variants.isEmpty ? "一键生成全部平台版本" : "全部重新生成") { runVariants([]) }
                             .buttonStyle(LinkButton()).disabled(busy.label != nil)
                     }
+                }
                 }
                 if let p = current {
                     if let v = a.variants[p.rawValue] {
@@ -110,6 +115,7 @@ struct DistributeCard: View {
     }
 
     var current: Platform? {
+        if let only { return only }
         let list = Platform.others(store)
         if let p = Platform.of(platform), list.contains(p) { return p }
         return list.first
@@ -267,6 +273,11 @@ struct DistributeCard: View {
 
     func runVariants(_ only: [Platform]) {
         let names = (only.isEmpty ? Platform.others(store) : only).map(\.name).joined(separator: "、")
+        if a.isShort, let p = Platform.of(a.primary) {
+            let style = store.style(a.styleId)
+            busy.run("正在重写\(p.name)…") { try await Publisher.makeShort(store, articleId, p, style: style) }
+            return
+        }
         busy.run("正在改写\(names)版本…") {
             try await Publisher.makeVariants(store, articleId, only: only)
         }
