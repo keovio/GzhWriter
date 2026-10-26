@@ -130,12 +130,13 @@ struct Article: Identifiable, Codable, Hashable {
     var scheduled: Date?                            // 计划发布时间
     var reminded = false
     var published = false
+    var failed = ""             // 自动流程停在哪一步出错（空=没出错），可以从断点继续
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -169,6 +170,7 @@ struct Article: Identifiable, Codable, Hashable {
         scheduled = try? c.decodeIfPresent(Date.self, forKey: .scheduled)
         reminded = (try? c.decode(Bool.self, forKey: .reminded)) ?? false
         published = (try? c.decode(Bool.self, forKey: .published)) ?? false
+        failed = (try? c.decode(String.self, forKey: .failed)) ?? ""
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
