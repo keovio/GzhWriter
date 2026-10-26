@@ -38,26 +38,121 @@ enum PlatformFill {
         }
     }
 
-    /// 只打开平台去登录（登录状态会记住，之后填稿不用再登）
+    /// 只打开平台去登录（登录状态会记住，之后填稿、存草稿不用再登）
     static func login(_ acc: Account) {
         guard let p = Platform.of(acc.platform) else { return }
-        let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = dataStore(acc)
-        let web = WKWebView(frame: .zero, configuration: cfg)
-        web.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-        web.load(URLRequest(url: p == .weibo ? URL(string: "https://weibo.com/login.php")! : p.publishURL))
+        let model = LoginModel(account: acc, store: dataStore(acc))
+        let host = NSHostingView(rootView: LoginView(model: model))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
-        w.title = "登录\(p.name)「\(acc.name)」（登录后直接关掉这个窗口就行）"
-        w.contentView = web
+        w.title = "登录\(p.name)「\(acc.name)」"
+        w.contentView = host
         w.isReleasedWhenClosed = false
         w.center()
         w.makeKeyAndOrderFront(nil)
+        model.window = w
         windows.append(w)
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
-            Task { @MainActor in windows.removeAll { $0 === w } }
+            Task { @MainActor in
+                windows.removeAll { $0 === w }
+                NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
+            }
         }
     }
+
+    /// 平台登录后才会有的 cookie
+    static func sessionCookies(_ p: Platform) -> (domain: String, names: [String]) {
+        switch p {
+        case .toutiao: return ("toutiao.com", ["sessionid", "sessionid_ss", "sid_tt"])
+        case .baijiahao: return ("baidu.com", ["BDUSS", "BDUSS_BFESS"])
+        case .zhihu: return ("zhihu.com", ["z_c0"])
+        case .xiaohongshu: return ("xiaohongshu.com", ["galaxy_creator_session_id", "web_session", "access-token-creator.xiaohongshu.com"])
+        case .weibo: return ("weibo.com", ["SUB"])
+        case .wechat: return ("qq.com", ["slave_sid"])
+        }
+    }
+
+    static func isLoggedIn(_ store: WKWebsiteDataStore, _ p: Platform) async -> Bool {
+        let (domain, names) = sessionCookies(p)
+        let cookies: [HTTPCookie] = await withCheckedContinuation { c in
+            store.httpCookieStore.getAllCookies { c.resume(returning: $0) }
+        }
+        let now = Date()
+        return cookies.contains { ck in
+            ck.domain.hasSuffix(domain) && names.contains(ck.name) && !ck.value.isEmpty
+                && (ck.expiresDate.map { $0 > now } ?? true)
+        }
+    }
+
+    static func isLoggedIn(_ acc: Account) async -> Bool {
+        guard let p = Platform.of(acc.platform) else { return false }
+        return await isLoggedIn(dataStore(acc), p)
+    }
+
+    /// 能后台存草稿的平台（小红书要先传图、微博没有草稿箱）
+    static func draftable(_ p: Platform) -> Bool { p == .toutiao || p == .baijiahao || p == .zhihu }
+
+    /// 后台打开发文页，填好后存草稿。成功返回提示，失败抛错。发布永远是作者自己点。
+    static func saveDraft(store: Store, articleId: UUID, account acc: Account) async throws -> String {
+        guard let p = Platform.of(acc.platform), draftable(p) else { throw DraftError.msg("这个平台不支持存草稿") }
+        guard await isLoggedIn(acc) else { throw DraftError.msg("「\(acc.name)」还没登录\(p.name)，先在「我的账号」点登录") }
+        if store.article(articleId)?.variants[p.rawValue] == nil {
+            try await Publisher.makeVariants(store, articleId, only: [p])
+        }
+        guard let a = store.article(articleId), let v = a.variants[p.rawValue] else { throw DraftError.msg("没有\(p.name)版本") }
+        let model = FillModel(article: a, variant: v, platform: p.rawValue)
+        model.dataStore = dataStore(acc)
+        model.autoDraft = true
+        let host = NSHostingView(rootView: FillWeb(model: model))
+        // 屏幕外的窗口：不打扰，但网页照常跑
+        let w = NSWindow(contentRect: NSRect(x: -3000, y: -3000, width: 1280, height: 860),
+                         styleMask: [.borderless], backing: .buffered, defer: false)
+        w.contentView = host
+        w.isReleasedWhenClosed = false
+        w.alphaValue = 0
+        w.ignoresMouseEvents = true
+        w.orderFrontRegardless()
+        defer { w.orderOut(nil); w.contentView = nil }
+        return try await withCheckedThrowingContinuation { c in
+            var resumed = false
+            model.onDone = { r in
+                guard !resumed else { return }
+                resumed = true
+                switch r {
+                case .success(let m): c.resume(returning: m)
+                case .failure(let e): c.resume(throwing: e)
+                }
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                model.onDone?(.failure(DraftError.msg(model.filled ? "填好了但没找到存草稿按钮" : "90 秒没打开编辑器，可能登录过期了")))
+            }
+        }
+    }
+
+    /// 点「存草稿」一类的按钮；没有按钮的平台（头条、知乎）会自动保存
+    static let draftScript = """
+    (function() {
+      var docs = [document];
+      document.querySelectorAll('iframe').forEach(function(f) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} });
+      var re = /^(存草稿|保存草稿|存为草稿|保存为草稿|暂存离开|保存)$/;
+      for (var i = 0; i < docs.length; i++) {
+        var els = docs[i].querySelectorAll('button, [role="button"], a, span, div');
+        for (var j = 0; j < els.length; j++) {
+          var e = els[j];
+          var t = (e.innerText || '').replace(/\\s+/g, '');
+          if (!re.test(t) || e.children.length > 2) continue;
+          var r = e.getBoundingClientRect();
+          if (r.width < 4 || r.height < 4) continue;
+          e.click();
+          return 'clicked';
+        }
+      }
+      var txt = document.body ? document.body.innerText : '';
+      if (/(草稿已保存|已保存|保存成功|自动保存)/.test(txt)) return 'saved';
+      return 'none';
+    })()
+    """
 
     /// 正文 HTML：配图转成 data URI 内嵌
     static func bodyHTML(_ a: Article, _ v: PlatformVariant) -> String {
@@ -164,6 +259,9 @@ final class FillModel: ObservableObject {
     }
     @Published var filled = false
     var dataStore: WKWebsiteDataStore = .default()
+    var autoDraft = false
+    var onDone: ((Result<String, Error>) -> Void)?
+    private var draftTries = 0
     weak var web: WKWebView?
     private var tries = 0
     private var timer: Timer?
@@ -201,13 +299,168 @@ final class FillModel: ObservableObject {
                     self.filled = true
                     self.timer?.invalidate()
                     self.status = "已填好标题和正文。检查一遍、设封面和标签，再自己点「发布」。"
-                    Theme.tap()
+                    if self.autoDraft { self.saveDraftSoon() } else { Theme.tap() }
                 } else if !auto {
                     self.status = error != nil ? "填入出错：\(error!.localizedDescription)" : "还没找到编辑器，先登录并进入发文页。"
                 }
             }
         }
     }
+}
+
+extension FillModel {
+    /// 填好后等编辑器反应过来，再点存草稿
+    func saveDraftSoon() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            self?.tryDraft()
+        }
+    }
+
+    private func tryDraft() {
+        guard let web else { return }
+        web.evaluateJavaScript(PlatformFill.draftScript) { [weak self] result, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let r = result as? String ?? ""
+                if r == "clicked" || r == "saved" {
+                    // 给平台几秒把草稿存下来
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
+                    self.onDone?(.success(r == "clicked" ? "已存草稿" : "平台已自动存草稿"))
+                } else {
+                    self.retryDraft()
+                }
+            }
+        }
+    }
+
+    private func retryDraft() {
+        draftTries += 1
+        if draftTries >= 5 {
+            // 头条、知乎编辑器会自动保存草稿，等够时间就算存好
+            if platform == "toutiao" || platform == "zhihu" {
+                onDone?(.success("平台自动存草稿"))
+            } else {
+                onDone?(.failure(DraftError.msg("填好了但没找到存草稿按钮")))
+            }
+            return
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            self?.tryDraft()
+        }
+    }
+}
+
+enum DraftError: LocalizedError {
+    case msg(String)
+    var errorDescription: String? { if case .msg(let s) = self { return s }; return nil }
+}
+
+extension Notification.Name {
+    static let gzhLoginChanged = Notification.Name("gzhLoginChanged")
+}
+
+// MARK: - 登录窗口：顶部显示是否已登录
+
+@MainActor
+final class LoginModel: ObservableObject {
+    let account: Account
+    let dataStore: WKWebsiteDataStore
+    weak var window: NSWindow?
+    @Published var loggedIn = false
+    private var timer: Timer?
+
+    init(account: Account, store: WKWebsiteDataStore) {
+        self.account = account
+        self.dataStore = store
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.check() }
+        }
+        Task { await check() }
+    }
+
+    func check() async {
+        guard let p = Platform.of(account.platform) else { return }
+        let ok = await PlatformFill.isLoggedIn(dataStore, p)
+        if ok && !loggedIn {
+            loggedIn = true
+            Theme.tap()
+            NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
+        } else if !ok { loggedIn = false }
+    }
+
+    func stop() { timer?.invalidate() }
+
+    /// 退出登录：清掉这个号的 cookie
+    func logout() async {
+        guard let p = Platform.of(account.platform) else { return }
+        let domain = PlatformFill.sessionCookies(p).domain
+        let records = await dataStore.dataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes())
+        let mine = records.filter { $0.displayName.hasSuffix(domain) }
+        await dataStore.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: mine)
+        loggedIn = false
+        NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
+    }
+}
+
+struct LoginView: View {
+    @ObservedObject var model: LoginModel
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: model.loggedIn ? "checkmark.circle.fill" : "person.crop.circle.badge.questionmark")
+                    .foregroundStyle(model.loggedIn ? Theme.green : Theme.navy)
+                Text(model.loggedIn ? "已登录，会一直记住。以后填稿、存草稿都不用再登。" : "在下面登录（扫码或密码都行），登录成功这里会变绿。")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink)
+                Spacer()
+                if model.loggedIn {
+                    Button("关闭") { model.stop(); model.window?.close() }.buttonStyle(PrimaryButton())
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(model.loggedIn ? Theme.greenBg : Theme.blueBg)
+            Rectangle().fill(Theme.rule).frame(height: 1)
+            LoginWeb(model: model)
+        }
+        .frame(minWidth: 900, minHeight: 600)
+    }
+}
+
+struct LoginWeb: NSViewRepresentable {
+    let model: LoginModel
+
+    func makeCoordinator() -> Coordinator { Coordinator(model: model) }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+        let model: LoginModel
+        init(model: LoginModel) { self.model = model }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            Task { @MainActor in await model.check() }
+        }
+        // 扫码、第三方登录的弹窗在同一个窗口里打开
+        func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+                     for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            if navigationAction.targetFrame == nil { webView.load(navigationAction.request) }
+            return nil
+        }
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let cfg = WKWebViewConfiguration()
+        cfg.websiteDataStore = model.dataStore
+        let v = WKWebView(frame: .zero, configuration: cfg)
+        v.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        v.navigationDelegate = context.coordinator
+        v.uiDelegate = context.coordinator
+        v.allowsBackForwardNavigationGestures = true
+        let p = Platform.of(model.account.platform) ?? .toutiao
+        v.load(URLRequest(url: p == .weibo ? URL(string: "https://weibo.com/login.php")! : p.publishURL))
+        return v
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
 struct FillView: View {
