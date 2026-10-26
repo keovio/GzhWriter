@@ -131,12 +131,13 @@ struct Article: Identifiable, Codable, Hashable {
     var reminded = false
     var published = false
     var failed = ""             // 自动流程停在哪一步出错（空=没出错），可以从断点继续
+    var primary = "wechat"      // 主平台：wechat=公众号长文；xiaohongshu/weibo=直接写的短内容，正文在 variants[primary]
     var created = Date()
     var updated = Date()
 
     enum CodingKeys: String, CodingKey {
         case id, title, topic, viewpoint, material, styleId, outline, sections, review, stage,
-             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, created, updated
+             template, accent, fontSize, aiNotice, auto, log, kind, wechatDraft, cover, digest, variants, titleOptions, refId, materialIds, scheduled, reminded, published, failed, primary, created, updated
     }
     init() {}
     // 宽松解码：以后加字段不会让旧数据读不出来
@@ -171,18 +172,28 @@ struct Article: Identifiable, Codable, Hashable {
         reminded = (try? c.decode(Bool.self, forKey: .reminded)) ?? false
         published = (try? c.decode(Bool.self, forKey: .published)) ?? false
         failed = (try? c.decode(String.self, forKey: .failed)) ?? ""
+        primary = (try? c.decode(String.self, forKey: .primary)) ?? "wechat"
         created = (try? c.decode(Date.self, forKey: .created)) ?? d.created
         updated = (try? c.decode(Date.self, forKey: .updated)) ?? d.updated
     }
 
+    var isShort: Bool { primary != "wechat" }
+    var shortVariant: PlatformVariant? { isShort ? variants[primary] : nil }
+
     var displayTitle: String {
         if !title.isEmpty { return title }
+        if let v = shortVariant {
+            if !v.title.isEmpty { return v.title }
+            let first = v.body.split(separator: "\n").first.map(String.init) ?? ""
+            if !first.isEmpty { return String(first.prefix(24)) }
+        }
         if !topic.isEmpty { return topic }
         return "未命名稿件"
     }
 
     /// 纯文本全文（审稿、字数统计用）
     var plainText: String {
+        if let v = shortVariant { return v.title + "\n\n" + v.body }
         var s = title.isEmpty ? "" : "# \(title)\n\n"
         for (i, sec) in sections.enumerated() {
             s += "## \(i + 1). \(sec.heading)\n\n\(sec.body)\n\n"
@@ -191,7 +202,8 @@ struct Article: Identifiable, Codable, Hashable {
     }
 
     var wordCount: Int {
-        sections.reduce(0) { $0 + $1.body.filter { !$0.isWhitespace }.count }
+        if let v = shortVariant { return v.body.filter { !$0.isWhitespace }.count }
+        return sections.reduce(0) { $0 + $1.body.filter { !$0.isWhitespace }.count }
     }
 }
 
