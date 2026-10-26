@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p shots
           for p in workbench radar library accounts styles publish; do
-            GZH_PANE=$p ./build/GzhWriter.app/Contents/MacOS/GzhWriter > /dev/null 2>&1 &
+            GZH_DEMO=1 GZH_PANE=$p ./build/GzhWriter.app/Contents/MacOS/GzhWriter > /dev/null 2>&1 &
             PID=$!
             sleep 9
             screencapture -x shots/$p.png || true
