@@ -93,6 +93,7 @@ struct DistributeCard: View {
             }
             .padding(14)
             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
+        }
         .card()
     }
 
