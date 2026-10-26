@@ -307,6 +307,8 @@ struct PublishSettingsView: View {
     @State private var secret = ""
     @State private var ip = ""
     @State private var testResult = ""
+    @State private var wechatOpen = false
+    var showWechat: Bool { wechatOpen || !store.data.wechat.appId.isEmpty }
 
     func w<T>(_ kp: WritableKeyPath<WechatSettings, T>) -> Binding<T> {
         Binding(get: { store.data.wechat[keyPath: kp] }, set: { store.data.wechat[keyPath: kp] = $0; store.save() })
@@ -317,10 +319,24 @@ struct PublishSettingsView: View {
 
     var body: some View {
         Page(maxWidth: 840) {
-            PageHeader(title: "发布与分发", subtitle: "选你在做的平台。写完自动配图、推公众号草稿箱、出各平台版本。不会替你点发布。")
+            PageHeader(title: "平台与发布", subtitle: "勾上你在做的平台。每个平台都只帮你准备好，发布按钮你自己点。")
 
             VStack(alignment: .leading, spacing: 0) {
-                SectionTitle(text: "公众号草稿箱").padding(.bottom, 6)
+                SectionTitle(text: "我的平台", hint: "第一次用先点「登录」，登录一次会记住").padding(.bottom, 6)
+                ForEach(Array(Platform.allCases.enumerated()), id: \.element) { n, p in
+                    if n > 0 { Divider() }
+                    platformRow(p)
+                }
+                Divider()
+                SettingRow(label: "写完公众号长文后，顺带出勾上平台的版本", hint: "头条/百家/知乎改标题、开头和标签；小红书、微博重写成短内容") {
+                    Toggle("", isOn: au(\.variants)).toggleStyle(.switch).labelsHidden()
+                }
+            }
+            .card()
+
+            if showWechat {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionTitle(text: "公众号草稿箱设置", hint: "填好后写完可以一键存进公众号草稿箱").padding(.bottom, 6)
                 SettingRow(label: "AppID", hint: "公众号后台「设置与开发 → 开发接口管理」") {
                     TextField("wx…", text: w(\.appId)).fieldBox().frame(width: 340)
                 }
@@ -354,6 +370,8 @@ struct PublishSettingsView: View {
             }
             .card()
 
+            }
+
             VStack(alignment: .leading, spacing: 0) {
                 SectionTitle(text: "自动配图").padding(.bottom, 6)
                 SettingRow(label: "写完自动配图", hint: ImageGen.connection(store) == nil
@@ -381,23 +399,36 @@ struct PublishSettingsView: View {
             }
             .card()
 
-            VStack(alignment: .leading, spacing: 0) {
-                SectionTitle(text: "我的平台", hint: "勾上的平台会自动出对应版本，雷达和日历也按这个显示").padding(.bottom, 6)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
-                    ForEach(Platform.allCases) { p in platformToggle(p) }
-                }
-                .padding(.bottom, 10)
-                Divider()
-                SettingRow(label: "写完自动出各平台版本", hint: "头条/百家/知乎改标题、开头和标签；小红书、微博整篇重写成短内容。都去掉公众号引导语。") {
-                    Toggle("", isOn: au(\.variants)).toggleStyle(.switch).labelsHidden()
-                }
-            }
-            .card()
         }
         .task {
             secret = Keychain.get(Wechat.secretKey) ?? ""
             ip = await Wechat.publicIP() ?? "获取失败"
         }
+    }
+
+    func platformRow(_ p: Platform) -> some View {
+        let on = store.data.auto.platforms.contains(p.rawValue) || p == .wechat
+        return HStack(spacing: 12) {
+            Button {
+                guard p != .wechat else { return }
+                if on { store.data.auto.platforms.removeAll { $0 == p.rawValue } } else { store.data.auto.platforms.append(p.rawValue) }
+                store.save()
+            } label: {
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 17)).foregroundStyle(on ? p.color : Theme.faint)
+            }
+            .buttonStyle(RowButton())
+            PlatformTag(key: p.rawValue)
+            Text(p.howTo).font(.system(size: 12)).foregroundStyle(Theme.sub)
+            Spacer()
+            if p == .wechat {
+                Button(store.data.wechat.appId.isEmpty ? "设置草稿箱" : "已设置") { wechatOpen.toggle() }
+                    .buttonStyle(GhostButton())
+            } else {
+                Button("登录") { PlatformFill.login(p) }.buttonStyle(GhostButton())
+            }
+        }
+        .padding(.vertical, 10)
     }
 
     func platformToggle(_ p: Platform) -> some View {
