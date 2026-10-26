@@ -229,8 +229,11 @@ struct StylePreset: Identifiable, Codable, Hashable {
     var avoid: String = ""
     var signature: String = ""  // 文末一句话 / 署名
     var author: String = ""     // 作者名（草稿箱里显示）
+    var links: [String] = []    // 读过的范文链接
+    var guide: String = ""      // AI 分析出的风格说明（可改），写稿时优先用它
+    var guideAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, name, track, audience, sample, avoid, signature, author }
+    enum CodingKeys: String, CodingKey { case id, name, track, audience, sample, avoid, signature, author, links, guide, guideAt }
     init(name: String, sample: String = "", avoid: String = "") {
         self.name = name; self.sample = sample; self.avoid = avoid
     }
@@ -244,6 +247,9 @@ struct StylePreset: Identifiable, Codable, Hashable {
         avoid = (try? c.decode(String.self, forKey: .avoid)) ?? ""
         signature = (try? c.decode(String.self, forKey: .signature)) ?? ""
         author = (try? c.decode(String.self, forKey: .author)) ?? ""
+        links = (try? c.decode([String].self, forKey: .links)) ?? []
+        guide = (try? c.decode(String.self, forKey: .guide)) ?? ""
+        guideAt = try? c.decode(Date.self, forKey: .guideAt)
     }
 }
 
