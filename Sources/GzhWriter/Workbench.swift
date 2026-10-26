@@ -93,6 +93,12 @@ struct WorkbenchView: View {
             HStack(spacing: 6) {
                 SectionTitle(text: "写一篇", hint: "留空自动选题")
                 Spacer()
+                let labels = Role.allCases.map { store.modelLabel($0) }
+                if Set(labels).count == 1 {
+                    ModelTag(text: labels[0], prefix: "用")
+                } else {
+                    ForEach(Role.allCases) { RoleModelTag(role: $0) }
+                }
             }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
