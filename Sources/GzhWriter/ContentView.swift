@@ -2,14 +2,32 @@ import AppKit
 import SwiftUI
 
 enum Pane: Hashable {
-    case workbench, ideas, library, radar, breakdown, materials, plan, styles, models, auto, publish
+    case workbench, ideas, library, radar, breakdown, materials, plan, styles, models, auto, publish, accounts
     case article(UUID)
 }
 
 struct ContentView: View {
+    /// CI 截图用：GZH_PANE=radar 之类，直接打开那一页
+    static var startPane: Pane {
+        switch ProcessInfo.processInfo.environment["GZH_PANE"] ?? "" {
+        case "radar": return .radar
+        case "ideas": return .ideas
+        case "breakdown": return .breakdown
+        case "library": return .library
+        case "plan": return .plan
+        case "accounts": return .accounts
+        case "styles": return .styles
+        case "materials": return .materials
+        case "models": return .models
+        case "publish": return .publish
+        case "auto": return .auto
+        default: return .workbench
+        }
+    }
+
     @EnvironmentObject var store: Store
     @EnvironmentObject var pipeline: Pipeline
-    @State private var pane: Pane = .workbench
+    @State private var pane: Pane = ContentView.startPane
     @State private var back: Pane = .workbench
 
     var body: some View {
@@ -46,6 +64,7 @@ struct ContentView: View {
         case .materials: MaterialsView()
         case .plan: PlanView(open: open)
         case .styles: StylesView()
+        case .accounts: AccountsView()
         case .models: ModelsView()
         case .auto: AutoSettingsView()
         case .publish: PublishSettingsView()
@@ -192,7 +211,7 @@ enum NavGroup: CaseIterable {
         case .home: return "工作台"
         case .hot: return "选题"
         case .articles: return "稿件"
-        case .writing: return "我的风格"
+        case .writing: return "我的账号"
         case .settings: return "设置"
         }
     }
@@ -212,8 +231,8 @@ enum NavGroup: CaseIterable {
         case .home: return [("工作台", .workbench)]
         case .hot: return [("热点雷达", .radar), ("选题库", .ideas), ("爆文拆解", .breakdown)]
         case .articles: return [("全部稿件", .library), ("发布日历", .plan)]
-        case .writing: return [("账号设定", .styles), ("素材库", .materials)]
-        case .settings: return [("模型", .models), ("平台与发布", .publish), ("自动化", .auto)]
+        case .writing: return [("账号", .accounts), ("风格", .styles), ("素材库", .materials)]
+        case .settings: return [("模型", .models), ("发布", .publish), ("自动化", .auto)]
         }
     }
 
