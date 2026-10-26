@@ -353,12 +353,7 @@ struct PlanView: View {
             Spacer()
             ForEach(Platform.others(store).filter { a.variants[$0.rawValue] != nil }) { p in
                 let posted = a.variants[p.rawValue]?.posted ?? false
-                Button {
-                    store.update(a.id) {
-                        $0.variants[p.rawValue, default: PlatformVariant()].posted = !posted
-                        $0.variants[p.rawValue, default: PlatformVariant()].postedAt = posted ? nil : Date()
-                    }
-                } label: {
+                PostedToggle(articleId: a.id, platform: p.rawValue) {
                     HStack(spacing: 3) {
                         Image(systemName: posted ? "checkmark" : "circle").font(.system(size: 8, weight: .bold))
                         Text(p.name)
@@ -368,7 +363,6 @@ struct PlanView: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(posted ? p.color : p.color.opacity(0.1), in: Capsule())
                 }
-                .buttonStyle(RowButton())
                 .help(posted ? "\(p.name)已发，点一下取消" : "发完\(p.name)点一下标记")
             }
             if !a.published {
