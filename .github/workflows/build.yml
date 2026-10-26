@@ -32,6 +32,28 @@ jobs:
           { echo '```'; grep -E "error:|warning: .*will be an error" build.log | head -60; echo; tail -40 build.log; echo '```'; } > report.md
           gh issue create --title "构建失败 #${{ github.run_number }}" --body-file report.md
 
+      - name: Screenshots
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p shots
+          for p in workbench radar library accounts styles publish; do
+            GZH_PANE=$p ./build/GzhWriter.app/Contents/MacOS/GzhWriter > /dev/null 2>&1 &
+            PID=$!
+            sleep 9
+            screencapture -x shots/$p.png || true
+            kill $PID || true
+            sleep 2
+            [ -f shots/$p.png ] && sips -Z 1600 -s format jpeg shots/$p.png --out shots/$p.jpg > /dev/null && rm shots/$p.png
+          done
+          cd shots
+          git init -q
+          git checkout -q -b shots
+          git add .
+          git -c user.name=ci -c user.email=ci@local commit -qm "shots ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" shots
+
       - name: Zip app
         run: cd build && ditto -c -k --keepParent GzhWriter.app GzhWriter.zip
 
