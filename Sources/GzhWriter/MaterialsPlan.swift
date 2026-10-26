@@ -351,8 +351,28 @@ struct PlanView: View {
             Button(a.displayTitle) { open(a.id) }.buttonStyle(LinkButton(color: Theme.ink))
             if !a.wechatDraft.isEmpty { Chip(text: "已在草稿箱", fg: Theme.green, bg: Theme.greenBg) }
             Spacer()
+            ForEach(Platform.others(store).filter { a.variants[$0.rawValue] != nil }) { p in
+                let posted = a.variants[p.rawValue]?.posted ?? false
+                Button {
+                    store.update(a.id) {
+                        $0.variants[p.rawValue, default: PlatformVariant()].posted = !posted
+                        $0.variants[p.rawValue, default: PlatformVariant()].postedAt = posted ? nil : Date()
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: posted ? "checkmark" : "circle").font(.system(size: 8, weight: .bold))
+                        Text(p.name)
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(posted ? Color.white : p.color)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(posted ? p.color : p.color.opacity(0.1), in: Capsule())
+                }
+                .buttonStyle(RowButton())
+                .help(posted ? "\(p.name)已发，点一下取消" : "发完\(p.name)点一下标记")
+            }
             if !a.published {
-                Button("我发了") { store.update(a.id) { $0.published = true } }.buttonStyle(GhostButton())
+                Button("公众号发了") { store.update(a.id) { $0.published = true } }.buttonStyle(GhostButton())
                 Button("取消") { store.update(a.id) { $0.scheduled = nil } }.buttonStyle(LinkButton(color: Theme.sub))
             }
         }
