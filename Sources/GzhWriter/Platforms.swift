@@ -74,7 +74,7 @@ enum Platform: String, CaseIterable, Identifiable {
 
     @MainActor
     static func enabled(_ store: Store) -> [Platform] {
-        let on = store.data.auto.platforms
+        let on = store.data.accounts.isEmpty ? store.data.auto.platforms : store.data.accounts.map(\.platform)
         return allCases.filter { on.contains($0.rawValue) }
     }
 
