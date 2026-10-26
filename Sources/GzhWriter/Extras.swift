@@ -313,7 +313,9 @@ struct BreakdownView: View {
 
     var body: some View {
         Page {
-            PageHeader(title: "爆文拆解", subtitle: "贴一篇写得好的文章，提炼它的标题套路、开头、结构和技巧。只学方法，不存原文。")
+            PageHeader(title: "爆文拆解", subtitle: "贴一篇写得好的文章，提炼它的标题套路、开头、结构和技巧。只学方法，不存原文。") {
+                RoleModelTag(role: .review)
+            }
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
                     TextField("公众号文章链接 https://mp.weixin.qq.com/s/…", text: $url).fieldBox().onSubmit(run)
