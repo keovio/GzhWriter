@@ -1,9 +1,8 @@
-name: Build GzhWriter.app
+name: Build Mac + Windows
 
 on:
   push:
     branches: [main]
-    paths-ignore: ['windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
 
 concurrency:
@@ -15,7 +14,7 @@ permissions:
   issues: write
 
 jobs:
-  build:
+  mac:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -58,12 +57,80 @@ jobs:
       - name: Zip app
         run: cd build && ditto -c -k --keepParent GzhWriter.app GzhWriter.zip
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: build/GzhWriter.zip
+
+  win:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        shell: bash
+        run: npm install --no-audit --no-fund 2>&1 | tee ../install.log
+
+      - name: Screenshots
+        continue-on-error: true
+        shell: bash
+        env:
+          GZH_DEMO: '1'
+          GZH_SHOTS: workbench,library,editor,accounts,styles,models
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          timeout 120 npx electron . || true
+          cd shots
+          git init -q
+          git checkout -q -b shots-win
+          git add .
+          git -c user.name=ci -c user.email=ci@local commit -qm "win shots ${{ github.run_number }}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}" shots-win
+
+      - name: Build exe
+        shell: bash
+        run: npm run dist 2>&1 | tee ../build.log
+
+      - name: Report build errors
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; tail -40 ../install.log 2>/dev/null; echo; tail -80 ../build.log 2>/dev/null; echo '```'; } > report.md
+          gh issue create --title "Windows 构建失败 #${{ github.run_number }}" --body-file report.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win
+          path: windows/dist/*.exe
+
+  release:
+    needs: [mac, win]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
-          gh release create "$TAG" build/GzhWriter.zip \
-            --title "GzhWriter $TAG" \
-            --notes "解压后把 GzhWriter.app 拖进「应用程序」。首次打开若被拦截，在终端运行 xattr -cr /Applications/GzhWriter.app。" \
-            --latest
+          ls -la out
+          gh release create "$TAG" out/* -R ${{ github.repository }} --target ${{ github.sha }} \
+            --title "GzhWriter $TAG" --latest \
+            --notes "Mac：下载 GzhWriter.zip，解压后把 GzhWriter.app 拖进「应用程序」；首次打开若被拦截，在终端运行 xattr -cr /Applications/GzhWriter.app。
+          Windows：GzhWriter-Setup 是安装版，GzhWriter-Portable 是免安装版；首次打开若被拦截，点「更多信息 → 仍要运行」。"
+          # 只留最新这一个
+          gh release list -R ${{ github.repository }} --limit 50 --json tagName -q '.[].tagName' | grep -vx "$TAG" | while read t; do
+            gh release delete "$t" -R ${{ github.repository }} --cleanup-tag -y || true
+          done
