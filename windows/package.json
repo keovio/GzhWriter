@@ -4,11 +4,15 @@
   "version": "0.1.0",
   "description": "公众号写稿助手 Windows 版",
   "main": "main.js",
-  "author": "keovi",
+  "author": {
+    "name": "keovi",
+    "email": "l1574802397@163.com"
+  },
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win nsis portable --x64 --publish never",
-    "postinstall": "node -e \"require('fs').mkdirSync('renderer/vendor',{recursive:true});require('fs').copyFileSync('node_modules/vue/dist/vue.global.prod.js','renderer/vendor/vue.global.prod.js')\""
+    "postinstall": "node -e \"require('fs').mkdirSync('renderer/vendor',{recursive:true});require('fs').copyFileSync('node_modules/vue/dist/vue.global.prod.js','renderer/vendor/vue.global.prod.js')\"",
+    "dist:linux": "electron-builder --linux AppImage deb --x64 --publish never"
   },
   "devDependencies": {
     "electron": "33.2.1",
@@ -37,6 +41,17 @@
     },
     "portable": {
       "artifactName": "GzhWriter-Portable-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "executableName": "gzhwriter",
+      "synopsis": "公众号写稿助手",
+      "artifactName": "GzhWriter-${version}-linux.${ext}"
     }
-  }
+  },
+  "homepage": "https://github.com/keovio/GzhWriter"
 }
