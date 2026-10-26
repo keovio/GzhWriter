@@ -35,11 +35,29 @@ struct ArticleSection: Identifiable, Codable, Hashable {
     }
 }
 
-/// 其他平台的版本（头条号、百家号）
+/// 其他平台的版本。长文平台（头条/百家/知乎）只改标题、开头和标签，正文沿用主稿；
+/// 短内容平台（小红书/微博）整篇重写在 body 里。
 struct PlatformVariant: Codable, Hashable {
     var title = ""
     var intro = ""              // 改写过的开头一段
     var tags: [String] = []
+    var body = ""               // 整篇重写的正文（小红书、微博）
+    var posted = false          // 作者点了「我发了」
+    var postedAt: Date?
+
+    enum CodingKeys: String, CodingKey { case title, intro, tags, body, posted, postedAt }
+    init(title: String = "", intro: String = "", tags: [String] = [], body: String = "") {
+        self.title = title; self.intro = intro; self.tags = tags; self.body = body
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        intro = (try? c.decode(String.self, forKey: .intro)) ?? ""
+        tags = (try? c.decode([String].self, forKey: .tags)) ?? []
+        body = (try? c.decode(String.self, forKey: .body)) ?? ""
+        posted = (try? c.decode(Bool.self, forKey: .posted)) ?? false
+        postedAt = try? c.decodeIfPresent(Date.self, forKey: .postedAt)
+    }
 }
 
 /// 审稿给出的一条建议。只有作者点「采纳」才会改稿。
@@ -105,7 +123,7 @@ struct Article: Identifiable, Codable, Hashable {
     var wechatDraft = ""        // 推到公众号草稿箱后的 media_id
     var cover = ""              // 封面图文件名
     var digest = ""             // 摘要
-    var variants: [String: PlatformVariant] = [:]   // "toutiao" / "baijiahao"
+    var variants: [String: PlatformVariant] = [:]   // key 是 Platform.rawValue
     var titleOptions: [TitleOption] = []            // 标题多选
     var refId: UUID?                                // 参考的爆文拆解
     var materialIds: [UUID] = []                    // 用上的素材
@@ -237,8 +255,10 @@ struct AutoSettings: Codable, Hashable {
     var hotAuto = true
     var hotForTopic = true
     var lastHotFetch: Date?
+    var hotSources: [String] = HotSource.all.map(\.key)       // 雷达要看的其他平台热榜
+    var platforms: [String] = Platform.allCases.map(\.rawValue) // 我在做的平台
 
-    enum CodingKeys: String, CodingKey { case hotCategories, hotAuto, hotForTopic, lastHotFetch, passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance, useMaterials, autoSchedule, publishDays, publishHour, publishMinute }
+    enum CodingKeys: String, CodingKey { case hotSources, platforms, hotCategories, hotAuto, hotForTopic, lastHotFetch, passScore, maxRounds, useHot, targetWords, dailyEnabled, dailyHour, dailyMinute, dailyStyleId, lastDaily, images, imageEvery, imageStyle, variants, autoTitle, autoCompliance, useMaterials, autoSchedule, publishDays, publishHour, publishMinute }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -267,6 +287,8 @@ struct AutoSettings: Codable, Hashable {
         hotAuto = (try? c.decode(Bool.self, forKey: .hotAuto)) ?? d.hotAuto
         hotForTopic = (try? c.decode(Bool.self, forKey: .hotForTopic)) ?? d.hotForTopic
         lastHotFetch = try? c.decodeIfPresent(Date.self, forKey: .lastHotFetch)
+        hotSources = (try? c.decode([String].self, forKey: .hotSources)) ?? d.hotSources
+        platforms = (try? c.decode([String].self, forKey: .platforms)) ?? d.platforms
     }
 }
 
