@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 final class Store: ObservableObject {
     @Published var data = AppData()
+    /// 正在调用的模型（界面上显示「正在用 xx」）
+    @Published var calling: String?
     private var saveTask: Task<Void, Never>?
 
     static var folder: URL {
@@ -101,6 +103,12 @@ final class Store: ObservableObject {
 
     // MARK: 模型调用（按角色的顺序依次尝试，失败自动换下一个）
 
+    /// 这个用途现在会用哪个模型（排第一的那个）
+    func modelLabel(_ role: Role) -> String {
+        guard let c = connections(for: role).first else { return "还没配模型" }
+        return "\(c.name)（\(c.model)）"
+    }
+
     func connections(for role: Role) -> [ModelConnection] {
         let ids = data.roles[role.rawValue] ?? []
         let picked = ids.compactMap { id in data.connections.first { $0.id == id } }
@@ -112,6 +120,8 @@ final class Store: ObservableObject {
         guard !conns.isEmpty else { throw LLMError.noConnection }
         var errors: [String] = []
         for c in conns {
+            calling = "\(c.name)（\(c.model)）"
+            defer { calling = nil }
             do {
                 return try await LLM.chat(c, messages: messages, temperature: temperature)
             } catch {
