@@ -72,6 +72,8 @@ final class Pipeline: ObservableObject {
     @Published var lastError: String?
     private var queue: [(String, UUID?, UUID?, UUID?, String, UUID?)] = []   // 方向、账号、参考拆解、要续写的稿件
     private var working = false
+    private var fresh: Set<UUID> = []        // 刚建好、还没开始写的稿件
+    @Published var focus: UUID?              // 点了写一篇：跳到这篇稿件看它写
     private var timer: Timer?
 
     init(store: Store) {
@@ -88,16 +90,34 @@ final class Pipeline: ObservableObject {
     }
 
     var queued: Int { queue.count }
+    var active: Int { running.count }
 
     func refreshHot() async {
         hot = await HotList.fetchAll()
         hotLoadedAt = Date()
     }
 
-    /// 排入队列，按顺序一篇一篇写
-    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil, platform: String = "wechat", accountId: UUID? = nil) {
-        for _ in 0..<max(1, count) { queue.append((direction, styleId, refId, nil, platform, accountId)) }
+    /// 排入队列，按顺序一篇一篇写。稿件马上建好（标「排队中」），show=true 时直接跳到第一篇看它写
+    @discardableResult
+    func enqueue(direction: String, styleId: UUID?, count: Int = 1, refId: UUID? = nil, platform: String = "wechat", accountId: UUID? = nil, show: Bool = true) -> [UUID] {
+        var ids: [UUID] = []
+        let style = store.style(styleId)
+        let ref = store.breakdown(refId)
+        for _ in 0..<max(1, count) {
+            let id = store.newArticle(topic: direction)
+            store.update(id) {
+                $0.auto = true; $0.primary = platform; $0.accountId = accountId
+                $0.styleId = style?.id; $0.refId = ref?.id
+                $0.topic = direction.isEmpty ? "自动选题中…" : direction
+            }
+            running[id] = ids.isEmpty && !working ? "准备开始" : "排队中，等前面的写完"
+            fresh.insert(id)
+            queue.append((direction, styleId, refId, id, platform, accountId))
+            ids.append(id)
+        }
+        if show, let first = ids.first { focus = first }
         if !working { Task { await drain() } }
+        return ids
     }
 
     /// 从出错的地方接着写：已经写好的选题、大纲、段落都保留
@@ -116,7 +136,12 @@ final class Pipeline: ObservableObject {
         working = true
         while !queue.isEmpty {
             let (dir, sid, ref, rid, plat, acc) = queue.removeFirst()
-            if let rid { await work(rid, direction: dir, styleId: sid, refId: ref, resumed: true) }
+            if let rid {
+                // 稿件被删了就跳过
+                guard store.article(rid) != nil else { running[rid] = nil; fresh.remove(rid); continue }
+                let isNew = fresh.remove(rid) != nil
+                await work(rid, direction: dir, styleId: sid, refId: ref, resumed: !isNew)
+            }
             else { await produce(direction: dir, styleId: sid, refId: ref, platform: plat, accountId: acc) }
         }
         working = false
@@ -131,7 +156,7 @@ final class Pipeline: ObservableObject {
         if let last = s.lastDaily, cal.isDate(last, inSameDayAs: now) { return }
         store.data.auto.lastDaily = now
         store.save()
-        enqueue(direction: "", styleId: s.dailyStyleId ?? store.data.styles.first?.id)
+        enqueue(direction: "", styleId: s.dailyStyleId ?? store.data.styles.first?.id, show: false)
     }
 
     /// 到了计划发布时间，提醒作者去发
