@@ -256,7 +256,7 @@ struct DistributeCard: View {
                 }
             }
             .padding(.top, 2)
-            if let n = draftNote[p.rawValue] {
+            if let n = draftNote[p.rawValue] ?? draftedText(p) {
                 Text(n).font(.system(size: 11))
                     .foregroundStyle(n.hasPrefix("✓") ? Theme.green : Theme.orange)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -280,8 +280,19 @@ struct DistributeCard: View {
             Button { saveDraft(p, acc) } label: { label }
                 .buttonStyle(GhostButton())
                 .disabled(drafting != nil)
-                .help("后台填好后存到\(p.name)草稿箱，发布你去后台点")
+                .help("打开\(p.name)发文页，填好后存草稿；窗口留着，发布你自己点")
         }
+    }
+
+    /// 之前存过草稿的号，一直显示在这里
+    func draftedText(_ p: Platform) -> String? {
+        guard let a = store.article(articleId) else { return nil }
+        let f = DateFormatter(); f.dateFormat = "M月d日 HH:mm"
+        let list = store.accounts(on: p.rawValue).compactMap { acc -> String? in
+            guard let d = a.drafts[acc.id.uuidString] else { return nil }
+            return "「\(acc.name)」\(f.string(from: d))"
+        }
+        return list.isEmpty ? nil : "✓ 已存草稿：" + list.joined(separator: "、")
     }
 
     func saveDraft(_ p: Platform, _ acc: Account) {
@@ -290,7 +301,7 @@ struct DistributeCard: View {
         Task {
             do {
                 let m = try await PlatformFill.saveDraft(store: store, articleId: articleId, account: acc)
-                draftNote[p.rawValue] = "✓ \(m)：去\(p.name)「\(acc.name)」的草稿箱点发布"
+                draftNote[p.rawValue] = "✓ \(m)，已存到「\(acc.name)」"
             } catch {
                 draftNote[p.rawValue] = error.localizedDescription
             }
