@@ -162,6 +162,33 @@ enum Publisher {
         }
     }
 
+    /// 不写长文，直接按选题写一篇小红书 / 微博
+    static func makeShort(_ store: Store, _ id: UUID, _ p: Platform, style: StylePreset?) async throws {
+        guard let a = store.article(id) else { return }
+        let shape = p == .weibo ? "{\"body\":\"\",\"tags\":[\"\"]}" : "{\"title\":\"\",\"body\":\"\",\"tags\":[\"\"]}"
+        let msg: [ChatMessage] = [
+            .system("""
+            你帮作者写一篇\(p.name)内容，作者会自己改完再手动发。
+            \(p.rule)
+            正文段落之间空一行；标签不带 # 号。
+            写作者本人的观点和经验口吻，具体、有信息量，不说空话套话，不编造数据和作者没提供的亲身经历。
+            \(platformRules)
+            \(Prompts.styleBlock(style))
+            """),
+            .user("""
+            \(Prompts.profile(style))
+            选题：\(a.topic)
+            \(a.viewpoint.isEmpty ? "" : "作者观点：\(a.viewpoint)")
+            \(a.material.isEmpty ? "" : a.material)
+
+            输出 JSON：\(shape)
+            """),
+        ]
+        var v = try await store.runJSON(.draft, PlatformVariant.self, msg)
+        v.body = Humanize.clean(v.body)
+        store.update(id) { $0.variants[p.rawValue] = v }
+    }
+
     /// 平台版纯净 HTML（不带公众号的花哨样式和站外引导）
     static func platformHTML(_ a: Article, _ v: PlatformVariant) -> String {
         if !v.body.isEmpty {
