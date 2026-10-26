@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// 稿件批量处理：只处理本地稿件，不批量推草稿箱、不自动发布（公众号 3.27）。
+/// 稿件批量处理：可以存各平台草稿箱，但不自动发布（公众号 3.27）。
 @MainActor
 final class Batch: ObservableObject {
     static let shared = Batch()
@@ -223,6 +223,15 @@ struct BatchBar: View {
                     } label: { Label("出平台版本", systemImage: "square.on.square") }
                     .menuStyle(.borderlessButton).fixedSize()
 
+                    if !draftAccounts.isEmpty {
+                        Menu {
+                            ForEach(draftAccounts) { acc in
+                                Button("\(Platform.of(acc.platform)?.name ?? "")·\(acc.name)") { saveDrafts(acc) }
+                            }
+                        } label: { Label("存草稿箱", systemImage: "tray.and.arrow.down") }
+                        .menuStyle(.borderlessButton).fixedSize()
+                    }
+
                     Button { modelJob("审稿返修") { try await Batch.review(store, $0) } } label: { Label("审稿返修", systemImage: "checkmark.seal") }
                     Button {
                         modelJob("改敏感词") { id in _ = try await Compliance.autoFix(store, id) { s in store.update(id) { $0.log.append(s) } } }
@@ -277,6 +286,30 @@ struct BatchBar: View {
         note = ""
         if list.isEmpty { say("选中的没有可处理的长文（短内容或还没正文的会跳过）"); return }
         batch.run(title, list, pipeline: pipeline, job: job)
+    }
+
+    /// 能存草稿的号：配了 AppID 的公众号，登录过的头条/百家/知乎
+    var draftAccounts: [Account] {
+        store.data.accounts.filter { acc in
+            if acc.platform == "wechat" { return !acc.appId.isEmpty }
+            return Platform.of(acc.platform).map { PlatformFill.draftable($0) } ?? false
+        }
+    }
+
+    func saveDrafts(_ acc: Account) {
+        let s = store
+        let name = Platform.of(acc.platform)?.name ?? ""
+        modelJob("存到\(name)「\(acc.name)」草稿箱") { id in
+            if acc.platform == "wechat" {
+                let old = s.article(id)?.accountId
+                s.update(id) { $0.accountId = acc.id }
+                defer { s.update(id) { $0.accountId = old } }
+                try await Publisher.pushDraft(s, id) { m in s.update(id) { $0.log.append(m) } }
+            } else {
+                let m = try await PlatformFill.saveDraft(store: s, articleId: id, account: acc)
+                s.update(id) { $0.log.append("\(name)「\(acc.name)」：\(m)") }
+            }
+        }
     }
 
     func variants(_ only: [Platform]) {
