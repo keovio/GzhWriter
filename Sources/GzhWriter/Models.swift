@@ -343,6 +343,7 @@ struct AppData: Codable {
     var connections: [ModelConnection] = []
     /// 每个角色按顺序尝试的连接；前一个失败自动换下一个
     var roles: [String: [UUID]] = [:]
+    var roleModels: [String: String] = [:]      // "角色.连接ID" → 这个角色在这个平台用哪个模型（不填用连接默认模型）
     var auto = AutoSettings()
     var wechat = WechatSettings()
     var breakdowns: [Breakdown] = []
@@ -351,7 +352,7 @@ struct AppData: Codable {
     var hot: [HotArticle] = []
     var hotNames: [String: String] = [:]
 
-    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials, hot, hotNames, accounts }
+    enum CodingKeys: String, CodingKey { case articles, ideas, styles, connections, roles, auto, wechat, breakdowns, materials, hot, hotNames, accounts, roleModels }
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -360,6 +361,7 @@ struct AppData: Codable {
         styles = (try? c.decode([StylePreset].self, forKey: .styles)) ?? []
         connections = (try? c.decode([ModelConnection].self, forKey: .connections)) ?? []
         roles = (try? c.decode([String: [UUID]].self, forKey: .roles)) ?? [:]
+        roleModels = (try? c.decode([String: String].self, forKey: .roleModels)) ?? [:]
         auto = (try? c.decode(AutoSettings.self, forKey: .auto)) ?? AutoSettings()
         wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
         breakdowns = (try? c.decode([Breakdown].self, forKey: .breakdowns)) ?? []
