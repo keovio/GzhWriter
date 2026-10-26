@@ -11,6 +11,7 @@ struct WorkbenchView: View {
     @State private var styleId: UUID?
     @State private var count = 1
     @State private var refId: UUID?
+    @State private var target = "wechat"
     @State private var showAllHot = false
 
     var greeting: String {
@@ -86,9 +87,18 @@ struct WorkbenchView: View {
 
     var composer: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
+            HStack(spacing: 6) {
                 SectionTitle(text: "写一篇", hint: "留空就按赛道和今日热榜自动选题")
                 Spacer()
+                ForEach([("wechat", "公众号长文"), ("xiaohongshu", "小红书笔记"), ("weibo", "微博")], id: \.0) { key, name in
+                    Button { target = key } label: {
+                        Text(name).font(.system(size: 12, weight: target == key ? .semibold : .regular))
+                            .padding(.horizontal, 12).padding(.vertical, 5)
+                            .foregroundStyle(target == key ? Color.white : Theme.sub)
+                            .background(target == key ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Theme.bg), in: Capsule())
+                    }
+                    .buttonStyle(RowButton())
+                }
             }
             TextField("想写什么？比如：在职备考公务员，每天两小时怎么安排", text: $direction, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -120,7 +130,7 @@ struct WorkbenchView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.rule))
                 }
-                if !store.data.breakdowns.isEmpty {
+                if !store.data.breakdowns.isEmpty && target == "wechat" {
                     labeled("参考写法") {
                         Picker("", selection: $refId) {
                             Text("不参考").tag(UUID?.none)
@@ -129,7 +139,8 @@ struct WorkbenchView: View {
                         .labelsHidden().frame(width: 150)
                     }
                 }
-                Text("约 \(store.data.auto.targetWords) 字 · 不到 \(store.data.auto.passScore) 分自动返修")
+                Text(target == "wechat" ? "约 \(store.data.auto.targetWords) 字 · 不到 \(store.data.auto.passScore) 分自动返修，写完自动出其他平台版本"
+                     : (target == "weibo" ? "140–300 字短帖，直接写，不写长文" : "300–600 字笔记，直接写，不写长文"))
                     .font(.system(size: 12)).foregroundStyle(Theme.faint)
                 Spacer()
                 Button(action: go) {
@@ -137,14 +148,6 @@ struct WorkbenchView: View {
                 }
                 .buttonStyle(PrimaryButton(large: true))
                 .disabled(store.data.connections.isEmpty)
-            }
-            HStack(spacing: 6) {
-                ForEach(["选题", "大纲", "正文", "审稿", "返修", "敏感词", "标题", "排版"], id: \.self) { s in
-                    Chip(text: s)
-                    if s != "排版" { Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(Theme.faint) }
-                }
-                Spacer()
-                Text("只生成草稿，发布由你来").font(.system(size: 11)).foregroundStyle(Theme.faint)
             }
         }
         .card()
@@ -158,7 +161,8 @@ struct WorkbenchView: View {
     }
 
     func go() {
-        pipeline.enqueue(direction: direction.trimmingCharacters(in: .whitespacesAndNewlines), styleId: styleId, count: count, refId: refId)
+        pipeline.enqueue(direction: direction.trimmingCharacters(in: .whitespacesAndNewlines), styleId: styleId, count: count,
+                         refId: target == "wechat" ? refId : nil, platform: target)
         direction = ""
     }
 
@@ -553,5 +557,41 @@ struct RunLog: View {
 
     static func isError(_ line: String) -> Bool {
         line.contains("出错") || line.contains("失败") || line.contains("停下")
+    }
+}
+
+
+// MARK: 直接写的小红书 / 微博
+
+struct ShortArticleView: View {
+    @EnvironmentObject var store: Store
+    @EnvironmentObject var pipeline: Pipeline
+    let articleId: UUID
+    var close: () -> Void
+
+    var body: some View {
+        let a = store.article(articleId) ?? Article()
+        Page(maxWidth: 820) {
+            HStack(spacing: 10) {
+                Button { close() } label: { HStack(spacing: 4) { Image(systemName: "chevron.left"); Text("返回") } }
+                    .buttonStyle(LinkButton(color: Theme.sub))
+                PlatformTag(key: a.primary)
+                Text(a.displayTitle).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.ink).lineLimit(1)
+                Spacer()
+            }
+            if !a.topic.isEmpty && a.topic != "自动选题中…" {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("选题：" + a.topic).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+                    if !a.viewpoint.isEmpty { Text(a.viewpoint).font(.system(size: 12)).foregroundStyle(Theme.sub) }
+                }
+                .card(padding: 14)
+            }
+            if pipeline.running[articleId] != nil || !a.failed.isEmpty || a.variants[a.primary] == nil {
+                RunLog(articleId: articleId)
+            }
+            if a.variants[a.primary] != nil {
+                DistributeCard(articleId: articleId, only: Platform.of(a.primary))
+            }
+        }
     }
 }
