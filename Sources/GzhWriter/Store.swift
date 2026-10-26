@@ -25,6 +25,38 @@ final class Store: ObservableObject {
         }
         if ProcessInfo.processInfo.environment["GZH_DEMO"] != nil { demo() }
         migrateAccounts()
+        renameStyleNamedAccounts()
+    }
+
+    /// 老版本拿风格名给账号起名，容易把账号和风格搞混：改成「我的头条号」，登录后再换成平台昵称
+    func renameStyleNamedAccounts() {
+        let key = "renamedStyleAccounts.v1"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.set(true, forKey: key)
+        let styleNames = Set(data.styles.map(\.name))
+        var seen: [String: Int] = [:]
+        for i in data.accounts.indices {
+            let p = data.accounts[i].platform
+            seen[p, default: 0] += 1
+            if styleNames.contains(data.accounts[i].name) || data.accounts[i].name.isEmpty {
+                data.accounts[i].name = Account.defaultName(p, index: seen[p]!)
+            }
+        }
+        save()
+    }
+
+    /// 记下「已存进某个号的草稿箱」
+    func markDrafted(_ id: UUID, _ acc: Account) {
+        update(id) { $0.drafts[acc.id.uuidString] = Date() }
+    }
+
+    /// 登录后读到平台昵称：只替换还是默认名的号，用户自己改过的不动
+    func adoptNickname(_ accId: UUID, _ nick: String) {
+        let n = nick.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, n.count <= 30, let i = data.accounts.firstIndex(where: { $0.id == accId }),
+              data.accounts[i].isDefaultName else { return }
+        data.accounts[i].name = n
+        save()
     }
 
     /// CI 截图用的示例数据（只在设置了 GZH_DEMO 时）
@@ -52,13 +84,12 @@ final class Store: ObservableObject {
     func migrateAccounts() {
         guard data.accounts.isEmpty else { return }
         let style = data.styles.first
-        let name = style?.name ?? "我的公众号"
-        var wx = Account(platform: "wechat", name: name, styleId: style?.id, appId: data.wechat.appId)
+        var wx = Account(platform: "wechat", name: Account.defaultName("wechat", index: 1), styleId: style?.id, appId: data.wechat.appId)
         if let old = Keychain.get(Wechat.secretKey), !old.isEmpty { Keychain.set(old, for: wx.secretKey) }
         wx.appId = data.wechat.appId
         data.accounts = [wx]
         for p in data.auto.platforms where p != "wechat" && Platform.of(p) != nil {
-            data.accounts.append(Account(platform: p, name: name, styleId: style?.id))
+            data.accounts.append(Account(platform: p, name: Account.defaultName(p, index: 1), styleId: style?.id))
         }
         save()
     }
