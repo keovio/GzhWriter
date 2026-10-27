@@ -253,11 +253,45 @@ struct ArticleDetail: View {
             .opacity(locked ? 0.4 : 1)
             .disabled(locked)
 
+            platformStatus
+
             if let r = running {
                 Text("正在写第 \(a.stage.rawValue + 1) 步「\(r)」，写完就能改")
                     .font(.system(size: 11)).foregroundStyle(Theme.faint)
             }
         }
+    }
+
+    /// 这篇在各平台各个号上的状态：未存 / 已存草稿 / 已发
+    @ViewBuilder var platformStatus: some View {
+        let accs = Platform.allCases.flatMap { store.accounts(on: $0.rawValue) }
+        if !accs.isEmpty, !a.sections.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(accs) { acc in statusChip(acc) }
+                }
+            }
+        }
+    }
+
+    func statusChip(_ acc: Account) -> some View {
+        let p = Platform.of(acc.platform)
+        let many = store.accounts(on: acc.platform).count > 1
+        let name = (p?.name ?? "") + (many ? "「\(acc.name)」" : "")
+        let posted = store.isPosted(a, acc)
+        let drafted = a.drafts[acc.id.uuidString] != nil
+        let state = posted ? "已发" : (drafted ? "已存草稿" : "未存")
+        let color = posted ? Theme.green : (drafted ? Theme.blue : Theme.faint)
+        return HStack(spacing: 4) {
+            Circle().fill(p?.color ?? Theme.faint).frame(width: 6, height: 6)
+            Text(name).foregroundStyle(Theme.sub)
+            Text(state).foregroundStyle(color)
+        }
+        .font(.system(size: 11))
+        .lineLimit(1)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Theme.bg, in: Capsule())
+        .help(posted ? "你点过「我发了」" : (drafted ? "已经存进这个号的草稿箱，发布要你自己点" : "还没存进这个号的草稿箱"))
     }
 
     var regenBar: some View {
