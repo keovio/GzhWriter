@@ -178,6 +178,11 @@ struct ArticleDetail: View {
     @State private var showTitles = false
     @State private var toast = ""
     @State private var adviceOpen = false
+    @State private var custom: [UUID: String] = [:]      // 每段「说说怎么改」
+    @State private var undo: [UUID: String] = [:]        // 每段 AI 改之前的原文
+    @State private var revising: UUID?                   // 正在 AI 改的段
+    @State private var lastRevisedId: UUID?              // 出错提示显示在哪一段下面
+    @State private var reviseError: String?
 
     var a: Article { store.article(articleId) ?? article }
     var signature: String { store.style(a.styleId)?.signature ?? "" }
@@ -406,6 +411,7 @@ struct ArticleDetail: View {
                         .frame(minHeight: 160)
                         .padding(8)
                         .background(Theme.bg, in: RoundedRectangle(cornerRadius: 8))
+                    reviseRow(sec)
                 }
                 .padding(12)
                 .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 10))
@@ -413,6 +419,67 @@ struct ArticleDetail: View {
             }
             Button("加一段") { edit { $0.sections.append(ArticleSection(heading: "", body: "")) } }
                 .buttonStyle(GhostButton())
+        }
+    }
+
+    /// 每段下面：AI 改写这一段（不用整篇重新生成）
+    @ViewBuilder func reviseRow(_ sec: ArticleSection) -> some View {
+        HStack(spacing: 8) {
+            if revising == sec.id {
+                ProgressView().controlSize(.small)
+                Text("正在改这一段…").font(.system(size: 12)).foregroundStyle(Theme.sub)
+                Spacer()
+            } else if !sec.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Menu("AI 改这段") {
+                    ForEach(Prompts.Op.allCases) { op in
+                        Button(op.rawValue) { reviseSection(sec.id, op.instruction) }
+                    }
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .disabled(revising != nil)
+                TextField("或者说说怎么改，回车", text: Binding(
+                    get: { custom[sec.id] ?? "" }, set: { custom[sec.id] = $0 }))
+                    .textFieldStyle(.plain).font(.system(size: 12))
+                    .padding(.horizontal, 8).padding(.vertical, 5)
+                    .background(Theme.bg, in: RoundedRectangle(cornerRadius: 6))
+                    .disabled(revising != nil)
+                    .onSubmit {
+                        let t = (custom[sec.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty { custom[sec.id] = ""; reviseSection(sec.id, t) }
+                    }
+                if let old = undo[sec.id] {
+                    Button("撤销") {
+                        edit { art in
+                            if let k = art.sections.firstIndex(where: { $0.id == sec.id }) { art.sections[k].body = old }
+                        }
+                        undo[sec.id] = nil
+                    }
+                    .buttonStyle(LinkButton(color: Theme.orange))
+                }
+            }
+        }
+        if let e = reviseError, revising == nil, lastRevisedId == sec.id {
+            Text(e).font(.system(size: 11)).foregroundStyle(Theme.orange).textSelection(.enabled)
+        }
+    }
+
+    func reviseSection(_ id: UUID, _ instruction: String) {
+        let snap = a
+        guard let i = snap.sections.firstIndex(where: { $0.id == id }), revising == nil else { return }
+        revising = id
+        lastRevisedId = id
+        reviseError = nil
+        Task { @MainActor in
+            do {
+                let text = try await store.run(.draft, Prompts.revise(snap, index: i, instruction: instruction, style: store.style(snap.styleId)))
+                undo[id] = snap.sections[i].body
+                edit { art in
+                    if let k = art.sections.firstIndex(where: { $0.id == id }) { art.sections[k].body = Humanize.clean(text) }
+                }
+            } catch {
+                reviseError = error.localizedDescription
+            }
+            revising = nil
         }
     }
 
