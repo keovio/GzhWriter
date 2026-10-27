@@ -153,7 +153,7 @@ enum PlatformFill {
 
     /// 打开发文页（看得见的窗口），填好后点存草稿。发布永远是作者自己点。
     /// closeWhenDone：批量时存好自动关窗口接着下一篇；单篇存好后窗口留着，可以直接检查、发布。
-    static func saveDraft(store: Store, articleId: UUID, account acc: Account, closeWhenDone: Bool = false) async throws -> String {
+    static func saveDraft(store: Store, articleId: UUID, account acc: Account, closeWhenDone: Bool = false, force: Bool = false) async throws -> String {
         guard let p = Platform.of(acc.platform), draftable(p) else { throw DraftError.msg("这个平台不支持存草稿") }
         guard !needsMacOS14(acc) else { throw DraftError.msg(macOS14Hint) }
         guard await isLoggedIn(acc) else { throw DraftError.msg("「\(acc.name)」还没登录\(p.name)，先在「我的账号」点登录") }
@@ -161,6 +161,8 @@ enum PlatformFill {
             try await Publisher.makeVariants(store, articleId, only: [p])
         }
         guard let a = store.article(articleId), let v = a.variants[p.rawValue] else { throw DraftError.msg("没有\(p.name)版本") }
+        let unverified = UnverifiedError.count(v.title + "\n" + v.body)
+        if unverified > 0, !force { throw UnverifiedError(count: unverified) }
         let model = FillModel(article: a, variant: v, platform: p.rawValue)
         model.dataStore = dataStore(acc)
         model.autoDraft = true

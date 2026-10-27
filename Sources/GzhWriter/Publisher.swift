@@ -243,8 +243,10 @@ enum Publisher {
 
     // MARK: 公众号草稿箱
 
-    static func pushDraft(_ store: Store, _ id: UUID, log: (String) -> Void) async throws {
+    static func pushDraft(_ store: Store, _ id: UUID, force: Bool = false, log: (String) -> Void) async throws {
         guard let a = store.article(id) else { return }
+        let unverified = UnverifiedError.count(a.plainText)
+        if unverified > 0, !force { throw UnverifiedError(count: unverified) }
         let w = store.data.wechat
         guard let acc = store.wechatAccount(for: a), !Wechat.secret(appId: acc.appId, store: store).isEmpty
         else { throw WechatError.notConfigured }

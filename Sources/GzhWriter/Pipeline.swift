@@ -351,7 +351,10 @@ final class Pipeline: ObservableObject {
                 guard let a = store.article(id), i < a.sections.count else { break }
                 if !a.sections[i].body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
                 log(id, "写第 \(i + 1)/\(n) 部分")
-                let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per, ref: ref, mats: mats))
+                let live = LiveText.shared
+                defer { live.text[id] = nil }
+                let text = try await store.run(.draft, Prompts.section(a, index: i, style: style, words: per, ref: ref, mats: mats),
+                                               onPartial: { live.text[id] = $0 })
                 store.update(id) { if i < $0.sections.count { $0.sections[i].body = Humanize.clean(text) } }
             }
 

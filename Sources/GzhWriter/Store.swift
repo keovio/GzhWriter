@@ -379,7 +379,8 @@ final class Store: ObservableObject {
         }
     }
 
-    func run(_ role: Role, _ messages: [ChatMessage], temperature: Double = 0.7) async throws -> String {
+    func run(_ role: Role, _ messages: [ChatMessage], temperature: Double = 0.7,
+             onPartial: (@MainActor (String) -> Void)? = nil) async throws -> String {
         let conns = connections(for: role)
         guard !conns.isEmpty else { throw LLMError.noConnection }
         var errors: [String] = []
@@ -388,8 +389,9 @@ final class Store: ObservableObject {
             calling = "\(c.name)（\(c.model)）"
             defer { calling = nil }
             do {
-                return try await LLM.chat(c, messages: messages, temperature: temperature)
+                return try await LLM.chat(c, messages: messages, temperature: temperature, onPartial: onPartial)
             } catch {
+                if let onPartial { onPartial("") }   // 换下一个模型从头写
                 errors.append("· \(c.name)：\(error.localizedDescription)")
                 retryable = retryable || Pipeline.transient(error)
             }
@@ -406,4 +408,11 @@ final class Store: ObservableObject {
         }
         throw lastError
     }
+}
+
+
+/// 正在边写边出的正文（不存盘、不进 Store，免得每个字都刷新整个界面）。只在主线程改。
+final class LiveText: ObservableObject {
+    static let shared = LiveText()
+    @Published var text: [UUID: String] = [:]
 }

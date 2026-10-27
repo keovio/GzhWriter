@@ -11,6 +11,14 @@ struct DistributeCard: View {
     @State private var copiedKey = ""
     @State private var drafting: String?      // 正在存草稿的平台
     @State private var draftNote: [String: String] = [:]
+    @State private var unverifiedAsk: UnverifiedAsk?
+
+    /// 存草稿被【待核实】拦下时，问一句要不要仍然存
+    struct UnverifiedAsk: Identifiable {
+        let id = UUID()
+        let count: Int
+        let proceed: () -> Void
+    }
 
     var a: Article { store.article(articleId) ?? Article() }
 
@@ -102,6 +110,12 @@ struct DistributeCard: View {
             .background(Theme.bg, in: RoundedRectangle(cornerRadius: 10))
         }
         .card()
+        .alert(item: $unverifiedAsk) { ask in
+            Alert(title: Text("还有 \(ask.count) 处【待核实】没补"),
+                  message: Text("这些黄底标记会原样进草稿箱。建议先补上或删掉。"),
+                  primaryButton: .cancel(Text("回去改")),
+                  secondaryButton: .destructive(Text("仍然存草稿"), action: ask.proceed))
+        }
     }
 
     // MARK: 子视图
@@ -295,13 +309,15 @@ struct DistributeCard: View {
         return list.isEmpty ? nil : "✓ 已存草稿：" + list.joined(separator: "、")
     }
 
-    func saveDraft(_ p: Platform, _ acc: Account) {
+    func saveDraft(_ p: Platform, _ acc: Account, force: Bool = false) {
         drafting = p.rawValue
         draftNote[p.rawValue] = nil
         Task {
             do {
-                let m = try await PlatformFill.saveDraft(store: store, articleId: articleId, account: acc)
+                let m = try await PlatformFill.saveDraft(store: store, articleId: articleId, account: acc, force: force)
                 draftNote[p.rawValue] = "✓ \(m)，已存到「\(acc.name)」"
+            } catch let e as UnverifiedError {
+                unverifiedAsk = UnverifiedAsk(count: e.count) { saveDraft(p, acc, force: true) }
             } catch {
                 draftNote[p.rawValue] = error.localizedDescription
             }
@@ -365,9 +381,13 @@ struct DistributeCard: View {
         }
     }
 
-    func push() {
+    func push(force: Bool = false) {
         busy.run("正在推到草稿箱…") {
-            try await Publisher.pushDraft(store, articleId) { msg in busy.label = msg }
+            do {
+                try await Publisher.pushDraft(store, articleId, force: force) { msg in busy.label = msg }
+            } catch let e as UnverifiedError {
+                unverifiedAsk = UnverifiedAsk(count: e.count) { push(force: true) }
+            }
         }
     }
 }

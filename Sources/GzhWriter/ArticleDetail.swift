@@ -355,6 +355,7 @@ struct ArticleDetail: View {
                         .frame(width: 10, height: 10)
                 }
             }
+            LiveDraft(articleId: articleId)
             RunLog(articleId: articleId)
         }
         .padding(16)
@@ -477,5 +478,44 @@ struct ArticleDetail: View {
         showTitles = false
         edit { $0.published = true }
         Theme.tap()
+    }
+}
+
+/// 写正文时边写边显示：已写好的部分 + 正在写的这段
+struct LiveDraft: View {
+    @EnvironmentObject var store: Store
+    @ObservedObject var live = LiveText.shared
+    let articleId: UUID
+
+    var body: some View {
+        let a = store.article(articleId) ?? Article()
+        let current = live.text[articleId] ?? ""
+        let done = a.sections.filter { !$0.body.isEmpty }
+        if !done.isEmpty || !current.isEmpty {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(done) { sec in
+                            if !sec.heading.isEmpty {
+                                Text(sec.heading).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                            }
+                            Text(sec.body.replacingOccurrences(of: "**", with: ""))
+                                .font(.system(size: 13)).foregroundStyle(Theme.ink).lineSpacing(4)
+                        }
+                        if !current.isEmpty {
+                            Text(current.replacingOccurrences(of: "**", with: ""))
+                                .font(.system(size: 13)).foregroundStyle(Theme.sub).lineSpacing(4)
+                        }
+                        Color.clear.frame(height: 1).id("end")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .padding(12)
+                }
+                .frame(minHeight: 160, maxHeight: 360)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 8))
+                .onChange(of: current) { _ in proxy.scrollTo("end", anchor: .bottom) }
+            }
+        }
     }
 }

@@ -124,7 +124,12 @@ enum LLM {
         return url
     }
 
-    static func chat(_ conn: ModelConnection, messages: [ChatMessage], temperature: Double = 0.7) async throws -> String {
+    /// onPartial 不为空时走流式：边收边回调已收到的全文（已去掉思考过程），返回值和非流式一样。
+    static func chat(_ conn: ModelConnection, messages: [ChatMessage], temperature: Double = 0.7,
+                     onPartial: (@MainActor (String) -> Void)? = nil) async throws -> String {
+        if let onPartial {
+            return try await chatStream(conn, messages: messages, temperature: temperature, onPartial: onPartial)
+        }
         guard let key = Keychain.get(conn.id.uuidString), !key.isEmpty else { throw LLMError.noKey(conn.name) }
         var req = URLRequest(url: try endpoint(conn.baseURL, "/chat/completions"))
         req.httpMethod = "POST"
@@ -169,6 +174,102 @@ enum LLM {
             throw LLMError.empty
         }
         return stripThinking(content)
+    }
+
+    /// 流式版：SSE 逐段读 delta.content。服务不支持流式（返回普通 JSON）时照常解析整段。
+    static func chatStream(_ conn: ModelConnection, messages: [ChatMessage], temperature: Double,
+                           onPartial: @escaping @MainActor (String) -> Void) async throws -> String {
+        guard let key = Keychain.get(conn.id.uuidString), !key.isEmpty else { throw LLMError.noKey(conn.name) }
+        var req = URLRequest(url: try endpoint(conn.baseURL, "/chat/completions"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 600            // 流式下这是「多久没收到新数据」，推理模型思考期可能很久不出字
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        var body: [String: Any] = [
+            "model": conn.model,
+            "messages": messages.map { ["role": $0.role, "content": $0.content] },
+            "temperature": temperature,
+            "stream": true,
+        ]
+
+        for attempt in 0..<2 {
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+            let http = resp as? HTTPURLResponse
+            let code = http?.statusCode ?? 0
+            let type = (http?.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+
+            // 出错或服务不支持流式：读完整段，按非流式的规则处理
+            if !(200..<300).contains(code) || !type.contains("event-stream") {
+                var data = Data()
+                for try await b in bytes { data.append(b) }
+                let raw = String(data: data, encoding: .utf8) ?? ""
+                if code == 400, attempt == 0, raw.contains("temperature") {
+                    body.removeValue(forKey: "temperature")   // 推理模型不接受 temperature
+                    continue
+                }
+                let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                let apiErr: String? = ((parsed?["error"] as? [String: Any])?["message"] as? String)
+                    ?? (parsed?["error"] as? String) ?? (parsed?["message"] as? String)
+                guard (200..<300).contains(code), parsed?["choices"] != nil || apiErr == nil else {
+                    let shown = code == 0 || (200..<300).contains(code) ? 400 : code
+                    throw LLMError.http(shown, apiErr ?? raw)
+                }
+                guard let choices = parsed?["choices"] as? [[String: Any]],
+                      let msg = choices.first?["message"] as? [String: Any],
+                      let content = msg["content"] as? String,
+                      !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    if (parsed?["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String == "content_filter" {
+                        throw LLMError.http(400, "内容被模型的安全审核拦截了，换个说法或换个模型再试")
+                    }
+                    throw LLMError.empty
+                }
+                let out = stripThinking(content)
+                await onPartial(out)
+                return out
+            }
+
+            var text = ""
+            var filtered = false
+            var last = Date.distantPast
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data:") else { continue }
+                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                if payload == "[DONE]" { break }
+                guard let d = payload.data(using: .utf8),
+                      let obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { continue }
+                if let e = obj["error"], !(e is NSNull) {
+                    let m = ((e as? [String: Any])?["message"] as? String) ?? "\(e)"
+                    throw LLMError.http(400, m)
+                }
+                guard let ch = (obj["choices"] as? [[String: Any]])?.first else { continue }
+                if ch["finish_reason"] as? String == "content_filter" { filtered = true }
+                if let piece = (ch["delta"] as? [String: Any])?["content"] as? String, !piece.isEmpty {
+                    text += piece
+                    // 最多每 0.2 秒刷新一次界面
+                    if Date().timeIntervalSince(last) > 0.2 {
+                        last = Date()
+                        await onPartial(visible(text))
+                    }
+                }
+            }
+            let out = stripThinking(text)
+            if out.isEmpty {
+                if filtered { throw LLMError.http(400, "内容被模型的安全审核拦截了，换个说法或换个模型再试") }
+                throw LLMError.empty
+            }
+            await onPartial(out)
+            return out
+        }
+        throw LLMError.empty
+    }
+
+    /// 流式过程中给用户看的部分：思考还没结束时不显示
+    static func visible(_ s: String) -> String {
+        if let r = s.range(of: "</think>") { return String(s[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines) }
+        if s.contains("<think>") { return "" }
+        return s
     }
 
     /// 拉取模型列表（不是所有服务都支持，失败就手动填）

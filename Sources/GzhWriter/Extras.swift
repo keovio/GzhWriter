@@ -447,3 +447,17 @@ struct BreakdownView: View {
 struct ReadError: LocalizedError {
     var errorDescription: String? { "没读到正文，点「直接粘贴正文」把文章贴进来试试。" }
 }
+
+
+// MARK: 存草稿前拦【待核实】
+
+/// 文中还有没补的【待核实】占位。存草稿默认拦下，用户确认后才带着存。
+struct UnverifiedError: LocalizedError {
+    let count: Int
+    var errorDescription: String? { "还有 \(count) 处【待核实】没补，补上或删掉再存草稿" }
+
+    static func count(_ text: String) -> Int {
+        guard let re = try? NSRegularExpression(pattern: #"【待核实[^】]*】"#) else { return 0 }
+        return re.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+    }
+}
