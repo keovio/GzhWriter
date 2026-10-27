@@ -28,7 +28,7 @@ struct ArticlePage: View {
             leftList
             rightDetail
         }
-        .padding(.horizontal, 32)
+        .padding(.horizontal, 20)
         .padding(.vertical, 28)
         .frame(maxWidth: 1280, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -70,7 +70,7 @@ struct ArticlePage: View {
                 }
             }
         }
-        .frame(width: 320)
+        .frame(width: 280)
     }
 
     func pill(_ t: String, _ i: Int) -> some View {

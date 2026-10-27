@@ -307,14 +307,14 @@ struct SettingsShell: View {
     var body: some View {
         ScrollView {
             HStack(alignment: .top, spacing: 20) {
-                column.frame(width: 160, alignment: .leading)
+                column.frame(width: 120, alignment: .leading)
                 content.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 32)
-            .padding(.vertical, 28)
-            // 以前限宽 800，右边内容装不下就整体往右溢出、被窗口切掉
-            .frame(maxWidth: 1100, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 24)
+            // 靠左贴着侧栏，不再整块居中（居中时左边空一大块，看着很宽）
+            .frame(maxWidth: 1000, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.bg)
     }
