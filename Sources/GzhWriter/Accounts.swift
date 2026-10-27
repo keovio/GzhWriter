@@ -95,13 +95,13 @@ struct AccountsView: View {
                     .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                     .frame(width: 28, height: 28)
                     .background(Platform.of(acc.platform)?.color ?? Theme.navy, in: Circle())
-                TextField("平台上的昵称", text: bind(acc.id, \.name)).fieldBox().frame(width: 200)
+                TextField("平台上的昵称", text: bind(acc.id, \.name)).fieldBox().frame(minWidth: 120, maxWidth: 200)
                 HStack(spacing: 6) {
                     Text("风格").font(.system(size: 12)).foregroundStyle(Theme.sub).fixedSize()
                     Picker("", selection: bind(acc.id, \.styleId)) {
                         ForEach(store.data.styles) { Text($0.name).tag(Optional($0.id)) }
                     }
-                    .labelsHidden().frame(width: 150)
+                    .labelsHidden().frame(minWidth: 100, maxWidth: 150)
                 }
                 Spacer()
                 if acc.platform != "wechat" {
@@ -124,10 +124,10 @@ struct AccountsView: View {
             if acc.platform == "wechat" {
                 HStack(spacing: 8) {
                     Text("草稿箱").font(.system(size: 12)).foregroundStyle(Theme.sub).fixedSize().frame(width: 40, alignment: .leading)
-                    TextField("AppID  wx…", text: bind(acc.id, \.appId)).fieldBox().frame(width: 200)
+                    TextField("AppID  wx…", text: bind(acc.id, \.appId)).fieldBox().frame(minWidth: 120, maxWidth: 200)
                     SecureField("AppSecret", text: Binding(get: { secrets[acc.id] ?? "" }, set: { secrets[acc.id] = $0 }))
-                        .fieldBox().frame(width: 220)
-                    Button("保存并测试") { test(acc) }.buttonStyle(GhostButton()).disabled(busy.label != nil)
+                        .fieldBox().frame(minWidth: 120, maxWidth: 220)
+                    Button("保存并测试") { test(acc) }.buttonStyle(GhostButton()).fixedSize().disabled(busy.label != nil)
                     if let t = tested[acc.id] {
                         Text(t).font(.system(size: 12)).foregroundStyle(t.hasPrefix("✓") ? Theme.green : Theme.orange).lineLimit(1)
                     }

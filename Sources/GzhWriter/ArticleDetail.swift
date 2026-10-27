@@ -30,7 +30,7 @@ struct ArticlePage: View {
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 28)
-        .frame(maxWidth: 800, alignment: .leading)
+        .frame(maxWidth: 1280, alignment: .leading)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.bg)
     }
@@ -238,9 +238,9 @@ struct ArticleDetail: View {
                     Button("复制富文本") { copyRich() }.buttonStyle(GhostButton())
                     Spacer()
                     if !a.failed.isEmpty {
-                        Button("重试") { pipeline.resume(articleId) }.buttonStyle(PrimaryButton())
+                        Button("重试") { pipeline.resume(articleId) }.buttonStyle(PrimaryButton()).fixedSize()
                     } else {
-                        Button("标为已发") { markPublished() }.buttonStyle(PrimaryButton())
+                        Button("标为已发") { markPublished() }.buttonStyle(PrimaryButton()).fixedSize()
                     }
                 }
                 if a.published { Spacer() }
@@ -327,13 +327,11 @@ struct ArticleDetail: View {
             } else if editing {
                 editorBlock
             } else {
+                // 只留一层边框：以前是白卡片里再套一个带边框的白框，看起来像两道框
                 WebPreview(html: Layout.previewPage(a, signature: signature))
-                    .frame(minHeight: 520)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rule))
-                    .padding(20)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.rule))
+                    .frame(maxWidth: .infinity, minHeight: 520, maxHeight: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.rule))
             }
         }
     }

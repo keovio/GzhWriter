@@ -101,6 +101,10 @@ struct ReviewResult: Codable, Hashable {
         else if let d = try? c.decodeIfPresent(Double.self, forKey: .total) { total = Int(d.rounded()) }
         else if let t = try? c.decodeIfPresent(String.self, forKey: .total), let d = Double(t) { total = Int(d.rounded()) }
         if total == 0, !scores.isEmpty { total = scores.values.reduce(0, +) / scores.count }
+        // 有的模型把五项加起来当总分（出现 435 分），换成平均分，否则及格线形同虚设
+        if total > 100 {
+            total = scores.isEmpty ? min(100, total / 5) : scores.values.reduce(0, +) / scores.count
+        }
         summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? ""
         suggestions = (try? c.decodeIfPresent([Suggestion].self, forKey: .suggestions)) ?? []
         factChecks = (try? c.decodeIfPresent([String].self, forKey: .factChecks)) ?? []

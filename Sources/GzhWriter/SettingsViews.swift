@@ -112,13 +112,13 @@ struct ConnectionEditor: View {
                 .buttonStyle(LinkButton(color: Theme.red))
             }
             .padding(.bottom, 6)
-            SettingRow(label: "名称") { TextField("", text: field(\.name)).fieldBox().frame(width: 380) }
+            SettingRow(label: "名称") { TextField("", text: field(\.name)).fieldBox().frame(minWidth: 200, maxWidth: 380) }
             Divider()
-            SettingRow(label: "接口地址", hint: "Base URL") { TextField("", text: field(\.baseURL)).fieldBox().frame(width: 380) }
+            SettingRow(label: "接口地址", hint: "Base URL") { TextField("", text: field(\.baseURL)).fieldBox().frame(minWidth: 200, maxWidth: 380) }
             Divider()
             SettingRow(label: "API Key", hint: "保存在钥匙串") {
                 SecureField("sk-…", text: $key)
-                    .fieldBox().frame(width: 380)
+                    .fieldBox().frame(minWidth: 200, maxWidth: 380)
                     .onSubmit { Keychain.set(key, for: connId.uuidString) }
                     .onChange(of: key) { v in
                         // 粘贴后不按回车直接离开也要存上
@@ -136,7 +136,7 @@ struct ConnectionEditor: View {
                         .fixedSize()
                     }
                 }
-                .frame(width: 380)
+                .frame(minWidth: 200, maxWidth: 380)
             }
             HStack(spacing: 10) {
                 Button("保存 Key") { Keychain.set(key, for: connId.uuidString); testResult = "已保存到钥匙串" }
@@ -307,12 +307,13 @@ struct SettingsShell: View {
     var body: some View {
         ScrollView {
             HStack(alignment: .top, spacing: 20) {
-                column.frame(width: 200, alignment: .leading)
-                content.frame(maxWidth: .infinity, alignment: .leading)
+                column.frame(width: 160, alignment: .leading)
+                content.frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 32)
             .padding(.vertical, 28)
-            .frame(maxWidth: 800, alignment: .leading)
+            // 以前限宽 800，右边内容装不下就整体往右溢出、被窗口切掉
+            .frame(maxWidth: 1100, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .background(Theme.bg)
