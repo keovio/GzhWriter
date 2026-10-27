@@ -117,12 +117,14 @@ final class HotRadar: NSObject, ObservableObject, WKNavigationDelegate {
 
     var stale: Bool {
         guard let t = store.data.auto.lastHotFetch else { return true }
-        return Date().timeIntervalSince(t) > 6 * 3600
+        // 过了零点也算过期：工作台只显示今天的热榜
+        return Date().timeIntervalSince(t) > 6 * 3600 || !Calendar.current.isDateInToday(t)
     }
 
     /// app 开着时每 6 小时自动拉一次
     func autoRefresh() async {
-        if store.data.auto.hotAuto && stale && !loading { await refresh() }
+        // 后台定时刷新不弹验证窗口抢焦点；app 在前台时可以弹
+        if store.data.auto.hotAuto && stale && !loading { await refresh(interactive: NSApp.isActive) }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -133,21 +135,28 @@ final class HotRadar: NSObject, ObservableObject, WKNavigationDelegate {
     }
 
     nonisolated func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        // 上一次加载被新加载取消时也会走到这里，不能让它提前结束新的等待
+        if (error as NSError).code == NSURLErrorCancelled { return }
         Task { @MainActor in loaded?.resume(); loaded = nil }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if (error as NSError).code == NSURLErrorCancelled { return }
         Task { @MainActor in loaded?.resume(); loaded = nil }
     }
 
+    private var navGen = 0
     private func load(_ url: URL) async {
         if let c = loaded { c.resume(); loaded = nil }
+        navGen += 1
+        let gen = navGen
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             loaded = c
             web.load(URLRequest(url: url))
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: 25_000_000_000)
-                if let self, let c = self.loaded { self.loaded = nil; c.resume() }
+                // 只结束自己这一次的等待，不误伤后面的加载
+                if let self, self.navGen == gen, let c = self.loaded { self.loaded = nil; c.resume() }
             }
         }
     }
@@ -200,12 +209,13 @@ final class HotRadar: NSObject, ObservableObject, WKNavigationDelegate {
     }
 
     /// 读一页；碰到验证就亮窗口，等作者过完（最多 3 分钟）
-    private func fetch(_ url: URL) async -> Extract {
+    private func fetch(_ url: URL, interactive: Bool) async -> Extract {
         await load(url)
         var r = await extract()
         if !r.rows.isEmpty { return r }
         // 页面正常但榜单是空的（节点停更），不用验证
         if r.ok && !r.title.contains("验证") { return r }
+        guard interactive else { status = "榜单网站要验证，点「刷新」或回到 app 时过一下"; return r }
         showWindow()
         needsVerify = true
         status = "榜单网站要做一次安全验证，在弹出的窗口里过一下就好"
@@ -238,7 +248,7 @@ final class HotRadar: NSObject, ObservableObject, WKNavigationDelegate {
         window?.contentView = nil
     }
 
-    func refresh() async {
+    func refresh(interactive: Bool = true) async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
@@ -246,14 +256,14 @@ final class HotRadar: NSObject, ObservableObject, WKNavigationDelegate {
         for name in categories {
             guard let u = HotCategory.url(name) else { continue }
             status = "正在读公众号「\(name)」热文榜…"
-            let r = await fetch(u)
+            let r = await fetch(u, interactive: interactive)
             merge(r.rows, category: name, platform: "wechat")
             if !r.updated.isEmpty { updated["wechat:" + name] = r.updated }
             total += r.rows.count
         }
         for src in HotSource.all where store.data.auto.hotSources.contains(src.key) {
             status = "正在读\(src.name)热榜…"
-            let r = await fetch(src.url)
+            let r = await fetch(src.url, interactive: interactive)
             merge(r.rows, category: src.name, platform: src.key)
             if !r.updated.isEmpty { updated[src.key] = r.updated }
             total += r.rows.count

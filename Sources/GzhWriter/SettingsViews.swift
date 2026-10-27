@@ -120,6 +120,10 @@ struct ConnectionEditor: View {
                 SecureField("sk-…", text: $key)
                     .fieldBox().frame(width: 380)
                     .onSubmit { Keychain.set(key, for: connId.uuidString) }
+                    .onChange(of: key) { v in
+                        // 粘贴后不按回车直接离开也要存上
+                        if v != (Keychain.get(connId.uuidString) ?? "") { Keychain.set(v, for: connId.uuidString) }
+                    }
             }
             Divider()
             SettingRow(label: "默认模型", hint: "每一步用哪个，在下面「角色分工」里换") {
@@ -286,8 +290,19 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 
 struct SettingsShell: View {
     @EnvironmentObject var store: Store
-    @State private var category: SettingsCategory = .account
-    @State private var advancedOpen = false
+    @State private var category: SettingsCategory = SettingsShell.startCategory
+    @State private var advancedOpen = SettingsShell.startCategory == .advanced
+
+    /// GZH_PANE 环境变量直接打开对应的设置页（截图用）
+    static var startCategory: SettingsCategory {
+        switch ProcessInfo.processInfo.environment["GZH_PANE"] ?? "" {
+        case "models": return .model
+        case "styles": return .style
+        case "publish": return .publish
+        case "auto", "materials": return .advanced
+        default: return .account
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -308,7 +323,7 @@ struct SettingsShell: View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(SettingsCategory.allCases) { c in
                 if c == .advanced {
-                    Button { advancedOpen.toggle() } label: {
+                    Button { advancedOpen.toggle(); if advancedOpen { category = .advanced } } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "chevron.right")
                                 .font(.system(size: 9, weight: .bold))

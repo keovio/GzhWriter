@@ -58,7 +58,7 @@ struct ContentView: View {
     @ViewBuilder var page: some View {
         switch pane {
         case .compose: TopicsView(open: open, goArticles: { pane = .articles })
-        case .articles: ArticlePage(selected: $selected)
+        case .articles: ArticlePage(selected: $selected, openShort: open)
         case .settings: SettingsShell()
         }
     }

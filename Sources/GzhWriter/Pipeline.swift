@@ -148,7 +148,9 @@ final class Pipeline: ObservableObject {
         cancelled.remove(id)
         store.update(id) { $0.failed = "" }
         running[id] = "排队中，等前面的写完"
-        queue.append((a.topic, a.styleId, a.refId, id, a.primary, a.accountId))
+        // 选题那步还没做完就断了：topic 还是占位文字，不能拿它当方向去选题
+        let dir = a.topic == "自动选题中…" ? "" : a.topic
+        queue.append((dir, a.styleId, a.refId, id, a.primary, a.accountId))
         if !working { Task { await drain() } }
     }
 
@@ -252,6 +254,7 @@ final class Pipeline: ObservableObject {
         if let e = error as? LLMError {
             switch e {
             case .noConnection, .noKey, .badURL: return false
+            case .allFailed(_, let r): return r
             case .http(let code, _): return code == 429 || code >= 500
             default: return true
             }
@@ -279,7 +282,9 @@ final class Pipeline: ObservableObject {
             if settings.hotForTopic {
                 hotTitles = HotRadar.titlesForTopic(store) + hotTitles
             }
-            let existing = Dedupe.history(store, except: id)
+            let existing = Dedupe.history(store, except: id).filter {
+                direction.isEmpty || Dedupe.similarity($0, direction) < Dedupe.threshold
+            }
             var rejected: [String] = []
             var t = try await store.runJSON(.topic, TopicReply.self,
                                             Prompts.pickTopic(direction: direction, style: style, hot: hotTitles, existing: existing, ref: ref))
@@ -364,7 +369,9 @@ final class Pipeline: ObservableObject {
                 if r.total >= settings.passScore || round >= settings.maxRounds { break }
                 round += 1
                 let fixes = r.suggestions.filter { ($0.section ?? 0) >= 1 }
-                let grouped = Dictionary(grouping: fixes, by: { $0.section! - 1 })
+                let grouped = Dictionary(grouping: fixes, by: { ($0.section ?? 1) - 1 })
+                // 审稿没给出能落到具体段落的改法：再审一遍也是同样结果，白花钱
+                if grouped.isEmpty { break }
                 for (idx, list) in grouped.sorted(by: { $0.key < $1.key }) {
                     guard let cur = store.article(id), idx < cur.sections.count else { continue }
                     log(id, "返修第 \(idx + 1) 部分")

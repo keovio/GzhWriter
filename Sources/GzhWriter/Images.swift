@@ -89,7 +89,9 @@ enum ImageGen {
         guard let first = (obj?["data"] as? [[String: Any]])?.first else { throw LLMError.empty }
         if let b64 = first["b64_json"] as? String, let d = Data(base64Encoded: b64) { return d }
         guard let s = first["url"] as? String, let iu = URL(string: s) else { throw LLMError.empty }
-        let (img, _) = try await URLSession.shared.data(from: iu)
+        let (img, r) = try await URLSession.shared.data(from: iu)
+        let sc = (r as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(sc), NSImage(data: img) != nil else { throw LLMError.http(sc, "图片下载失败") }
         return img
     }
 }

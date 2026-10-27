@@ -21,9 +21,10 @@ final class Batch: ObservableObject {
     func stop() { stopFlag = true }
 
     /// 能交给模型处理的长文（有正文，不是小红书/微博短内容）
-    static func longForm(_ store: Store, _ ids: [UUID]) -> [UUID] {
+    static func longForm(_ store: Store, _ ids: [UUID], running: [UUID: String] = [:]) -> [UUID] {
         ids.filter { id in
-            guard let a = store.article(id) else { return false }
+            // 正在一键成稿的稿件不碰，免得两边同时改一篇
+            guard running[id] == nil, let a = store.article(id) else { return false }
             return !a.isShort && !a.sections.isEmpty
         }
     }
@@ -45,6 +46,11 @@ final class Batch: ObservableObject {
             for id in ids {
                 if stopFlag { break }
                 current = store.article(id)?.displayTitle ?? ""
+                if pipeline.running[id] != nil {
+                    failed[id] = "这篇正在自动写，先跳过了"
+                    done += 1
+                    continue
+                }
                 pipeline.running[id] = "批量：\(title)"
                 do {
                     try await job(id)
@@ -283,9 +289,9 @@ struct BatchBar: View {
     }
 
     func modelJob(_ title: String, _ job: @escaping (UUID) async throws -> Void) {
-        let list = Batch.longForm(store, ids)
+        let list = Batch.longForm(store, ids, running: pipeline.running)
         note = ""
-        if list.isEmpty { say("选中的没有可处理的长文（短内容或还没正文的会跳过）"); return }
+        if list.isEmpty { say("选中的没有可处理的长文（短内容、还没正文或正在自动写的会跳过）"); return }
         batch.run(title, list, pipeline: pipeline, job: job)
     }
 

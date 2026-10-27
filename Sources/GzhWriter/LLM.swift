@@ -96,7 +96,7 @@ enum LLMError: LocalizedError {
     case http(Int, String)
     case empty
     case badJSON(String)
-    case allFailed([String])
+    case allFailed([String], retryable: Bool = true)
 
     var errorDescription: String? {
         switch self {
@@ -107,7 +107,7 @@ enum LLMError: LocalizedError {
         case .http(let code, let body): return "接口返回 \(code)：\(body.prefix(300))"
         case .empty: return "模型没有返回内容。"
         case .badJSON(let raw): return "模型返回的格式没法解析，可以再试一次。\n\(raw.prefix(200))"
-        case .allFailed(let errs): return "所有模型都失败了：\n" + errs.joined(separator: "\n")
+        case .allFailed(let errs, _): return "所有模型都失败了：\n" + errs.joined(separator: "\n")
         }
     }
 }
@@ -118,7 +118,7 @@ enum LLM {
         var b = base.trimmingCharacters(in: .whitespacesAndNewlines)
         while b.hasSuffix("/") { b.removeLast() }
         if b.hasSuffix("/chat/completions") { b = String(b.dropLast("/chat/completions".count)) }
-        guard let url = URL(string: b + path), url.scheme?.hasPrefix("http") == true else {
+        guard let url = URL(string: b + path), url.scheme?.hasPrefix("http") == true, url.host?.isEmpty == false else {
             throw LLMError.badURL(base)
         }
         return url
@@ -128,7 +128,7 @@ enum LLM {
         guard let key = Keychain.get(conn.id.uuidString), !key.isEmpty else { throw LLMError.noKey(conn.name) }
         var req = URLRequest(url: try endpoint(conn.baseURL, "/chat/completions"))
         req.httpMethod = "POST"
-        req.timeoutInterval = 180
+        req.timeoutInterval = 600
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         let body: [String: Any] = [
@@ -138,16 +138,34 @@ enum LLM {
             "stream": false,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-        guard (200..<300).contains(code) else {
-            throw LLMError.http(code, String(data: data, encoding: .utf8) ?? "")
+        var (data, resp) = try await URLSession.shared.data(for: req)
+        var code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        // o 系列 / gpt-5 等推理模型不接受 temperature，去掉再试一次
+        if code == 400, String(data: data, encoding: .utf8)?.contains("temperature") == true {
+            var b2 = body
+            b2.removeValue(forKey: "temperature")
+            req.httpBody = try JSONSerialization.data(withJSONObject: b2)
+            (data, resp) = try await URLSession.shared.data(for: req)
+            code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         }
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = obj["choices"] as? [[String: Any]],
+        let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let apiErr: String? = ((parsed?["error"] as? [String: Any])?["message"] as? String)
+            ?? (parsed?["error"] as? String)
+            ?? (parsed?["message"] as? String)
+        let hasChoices = parsed?["choices"] != nil
+        guard (200..<300).contains(code), hasChoices || apiErr == nil else {
+            let shown = code == 0 || (200..<300).contains(code) ? 400 : code
+            throw LLMError.http(shown, apiErr ?? (String(data: data, encoding: .utf8) ?? ""))
+        }
+        guard let obj = parsed else { throw LLMError.badJSON(String(data: data, encoding: .utf8) ?? "") }
+        guard let choices = obj["choices"] as? [[String: Any]],
               let msg = choices.first?["message"] as? [String: Any],
               let content = msg["content"] as? String,
               !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let finish = (obj["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String
+            if finish == "content_filter" {
+                throw LLMError.http(400, "内容被模型的安全审核拦截了，换个说法或换个模型再试")
+            }
             throw LLMError.empty
         }
         return stripThinking(content)
@@ -170,6 +188,7 @@ enum LLM {
     static func stripThinking(_ s: String) -> String {
         var t = s
         if let r = t.range(of: "</think>") { t = String(t[r.upperBound...]) }
+        else if let r = t.range(of: "<think>") { t = String(t[..<r.lowerBound]) }
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -179,8 +198,24 @@ enum LLM {
         if let a = s.firstIndex(of: "{"), let b = s.lastIndex(of: "}"), a < b {
             s = String(s[a...b])
         }
-        guard let data = s.data(using: .utf8) else { throw LLMError.badJSON(raw) }
-        do { return try JSONDecoder().decode(T.self, from: data) } catch { throw LLMError.badJSON(raw) }
+        if let data = s.data(using: .utf8), let v = try? JSONDecoder().decode(T.self, from: data) { return v }
+        // 兜底：把字符串字面量里的裸换行/制表符转义后再试
+        var fixed = ""
+        var inStr = false
+        var esc = false
+        for ch in s {
+            if inStr && !esc && (ch == "\n" || ch == "\r" || ch == "\r\n" || ch == "\t") {
+                fixed += ch == "\t" ? "\\t" : "\\n"
+                continue
+            }
+            if ch == "\"" && !esc { inStr.toggle() }
+            esc = (ch == "\\" && !esc)
+            fixed.append(ch)
+        }
+        guard let d2 = fixed.data(using: .utf8), let v = try? JSONDecoder().decode(T.self, from: d2) else {
+            throw LLMError.badJSON(raw)
+        }
+        return v
     }
 }
 
@@ -202,8 +237,12 @@ enum PageReader {
         var req = URLRequest(url: url)
         req.timeoutInterval = 30
         req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
-        let (data, _) = try await URLSession.shared.data(for: req)
-        var html = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        if let code = (resp as? HTTPURLResponse)?.statusCode, !(200..<300).contains(code) {
+            throw LLMError.readFail("网页打不开（\(code)），把正文直接粘贴进来试试")
+        }
+        let gbk = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        var html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: gbk) ?? String(decoding: data, as: UTF8.self)
         var title = ""
         if let m = html.range(of: #"<meta property="og:title" content="([^"]*)""#, options: .regularExpression) {
             title = String(html[m]).replacingOccurrences(of: #"^.*content=""#, with: "", options: .regularExpression)

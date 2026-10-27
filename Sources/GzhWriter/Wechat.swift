@@ -17,7 +17,9 @@ enum WechatError: LocalizedError {
                     return "微信看到你的 IP 是 \(ip)，它不在白名单里。把 \(ip) 加到公众号后台「设置与开发 → 开发接口管理 → IP 白名单」，等一两分钟再试。开着代理/VPN 或家里宽带换了 IP 都会变。（\(code)）"
                 }
                 return "这台电脑的 IP 不在公众号白名单里。到公众号后台「设置与开发 → 开发接口管理 → IP 白名单」把本机 IP 加进去。（\(code)）"
-            case 40001, 40125, 40013:
+            case 40001:
+                return "公众号登录凭证失效了，或 AppSecret 不对。再推一次试试，还不行就重新复制 AppSecret。（\(code)）"
+            case 40125, 40013:
                 return "AppID 或 AppSecret 不对，重新复制一遍试试。（\(code)）"
             case 48001:
                 return "这个公众号没有草稿箱接口权限（未认证的个人号可能没有）。可以先用「复制富文本」。（\(code)）"
@@ -48,7 +50,8 @@ final class Wechat {
     /// 每个公众号的 AppSecret 单独存，按 AppID 找
     static func secret(appId: String, store: Store? = nil) -> String {
         let accs = (store ?? Store.shared)?.data.accounts ?? []
-        if let a = accs.first(where: { $0.platform == "wechat" && $0.appId == appId }),
+        let want = appId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let a = accs.first(where: { $0.platform == "wechat" && $0.appId.trimmingCharacters(in: .whitespacesAndNewlines) == want }),
            let s = Keychain.get(a.secretKey), !s.isEmpty { return s }
         return Keychain.get(secretKey) ?? ""
     }
@@ -65,6 +68,18 @@ final class Wechat {
     }
 
     func reset() { tokens = [:] }
+
+    /// token 在本地过期前就被作废（别的工具刷新过）时，清掉缓存重拿一次再试
+    private func withToken<T>(_ appId: String, _ call: (String) async throws -> T) async throws -> T {
+        do {
+            let t = try await accessToken(appId: appId)
+            return try await call(t)
+        } catch WechatError.api(let c, _) where c == 40001 || c == 42001 || c == 40014 {
+            tokens[appId] = nil
+            let t = try await accessToken(appId: appId)
+            return try await call(t)
+        }
+    }
 
     /// 本机公网 IP，方便用户加白名单
     /// 查本机出口 IP。先用国内服务：开着代理时，访问微信一般走直连，国外查到的是代理的 IP，不准。
@@ -89,18 +104,22 @@ final class Wechat {
 
     /// 封面：永久素材，返回 media_id
     func uploadCover(_ data: Data, appId: String) async throws -> String {
-        let t = try await accessToken(appId: appId)
-        let obj = try await upload("https://api.weixin.qq.com/cgi-bin/material/add_material?access_token=\(t)&type=image",
-                                   data: Self.jpeg(data, maxBytes: 9_000_000), filename: "cover.jpg")
+        let jpg = Self.jpeg(data, maxBytes: 9_000_000)
+        let obj = try await withToken(appId) { t in
+            try await self.upload("https://api.weixin.qq.com/cgi-bin/material/add_material?access_token=\(t)&type=image",
+                                  data: jpg, filename: "cover.jpg")
+        }
         guard let id = obj["media_id"] as? String else { throw WechatError.api(-1, "封面上传没返回 media_id") }
         return id
     }
 
     /// 正文图片：返回可以放进正文的 URL
     func uploadBodyImage(_ data: Data, appId: String) async throws -> String {
-        let t = try await accessToken(appId: appId)
-        let obj = try await upload("https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token=\(t)",
-                                   data: Self.jpeg(data, maxBytes: 950_000), filename: "img.jpg")
+        let jpg = Self.jpeg(data, maxBytes: 950_000)
+        let obj = try await withToken(appId) { t in
+            try await self.upload("https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token=\(t)",
+                                  data: jpg, filename: "img.jpg")
+        }
         guard let u = obj["url"] as? String else { throw WechatError.api(-1, "图片上传没返回 url") }
         return u
     }
@@ -108,7 +127,6 @@ final class Wechat {
     /// 新建草稿，返回草稿 media_id
     func addDraft(title: String, author: String, digest: String, html: String,
                   thumbId: String, openComment: Bool, appId: String) async throws -> String {
-        let t = try await accessToken(appId: appId)
         let article: [String: Any] = [
             "title": String(title.prefix(64)),
             "author": String(author.prefix(16)),
@@ -118,7 +136,9 @@ final class Wechat {
             "need_open_comment": openComment ? 1 : 0,
             "only_fans_can_comment": 0,
         ]
-        let obj = try await post("https://api.weixin.qq.com/cgi-bin/draft/add?access_token=\(t)", json: ["articles": [article]])
+        let obj = try await withToken(appId) { t in
+            try await self.post("https://api.weixin.qq.com/cgi-bin/draft/add?access_token=\(t)", json: ["articles": [article]])
+        }
         guard let id = obj["media_id"] as? String else { throw WechatError.api(-1, "草稿没返回 media_id") }
         return id
     }
@@ -126,7 +146,7 @@ final class Wechat {
     // MARK: 网络
 
     private func check(_ data: Data) throws -> [String: Any] {
-        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             throw WechatError.api(-1, String(data: data, encoding: .utf8) ?? "")
         }
         if let code = obj["errcode"] as? Int, code != 0 {

@@ -8,6 +8,8 @@ struct ArticlePage: View {
 
     /// 右栏选中的稿件（局部状态，不再是一个整页 pane）
     @Binding var selected: UUID?
+    /// 小红书 / 微博短内容走整页编辑器，不进右栏
+    var openShort: (UUID) -> Void = { _ in }
 
     @State private var query = ""
     @State private var filter = 0          // 0 全部 / 1 待发 / 2 已发
@@ -84,7 +86,7 @@ struct ArticlePage: View {
 
     func listRow(_ a: Article) -> some View {
         let on = selected == a.id
-        return Button { selected = a.id } label: {
+        return Button { if a.isShort { openShort(a.id) } else { selected = a.id } } label: {
             HStack(spacing: 10) {
                 Rectangle()
                     .fill(on ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Color.clear))
@@ -111,6 +113,13 @@ struct ArticlePage: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(RowButton())
+        .contextMenu {
+            Button("删除", role: .destructive) {
+                if pipeline.running[a.id] != nil { pipeline.stop(a.id) }
+                if selected == a.id { selected = nil }
+                store.deleteArticle(a.id)
+            }
+        }
     }
 
     // MARK: 右详情（§3.4）
@@ -118,6 +127,7 @@ struct ArticlePage: View {
     @ViewBuilder var rightDetail: some View {
         if let id = selected, let a = store.article(id) {
             ArticleDetail(articleId: id, article: a)
+                .id(id)     // 换一篇就重置编辑 / 确认条等状态，免得「继续」作用到别的稿件
                 .frame(maxWidth: .infinity, alignment: .topLeading)
         } else {
             VStack(spacing: 8) {
@@ -197,6 +207,10 @@ struct ArticleDetail: View {
                     .transition(.opacity)
             }
         }
+        .onAppear {
+            // 新建的空稿件直接进入改字，能马上动手写
+            if a.sections.isEmpty && a.failed.isEmpty && running == nil && !a.published { editing = true }
+        }
     }
 
     // 标题 + 徽标 + 操作行
@@ -247,6 +261,16 @@ struct ArticleDetail: View {
             Spacer()
             Button("继续") {
                 confirmingRegen = false
+                editing = false
+                // 保留选题和观点，清掉大纲、正文、审稿和备选标题，真正重写一遍
+                edit {
+                    $0.sections = []
+                    $0.outline = []
+                    $0.review = nil
+                    $0.titleOptions = []
+                    $0.stage = .topic
+                    $0.failed = ""
+                }
                 pipeline.resume(articleId)
             }
             .buttonStyle(GhostButton())
@@ -263,8 +287,10 @@ struct ArticleDetail: View {
                 Spacer()
                 Button("再来 5 个") { busy.run("正在想标题…") { try await TitleMaker.make(store, articleId) } }
                     .buttonStyle(LinkButton())
+                    .disabled(busy.label != nil)
                 Button("收起") { showTitles = false }.buttonStyle(LinkButton(color: Theme.faint))
             }
+            BusyBar(busy: busy)
             if a.titleOptions.isEmpty {
                 Text("还没有备选标题，点「再来 5 个」生成").font(.system(size: 12)).foregroundStyle(Theme.sub)
             }
@@ -386,6 +412,8 @@ struct ArticleDetail: View {
                 .background(Theme.sheet, in: RoundedRectangle(cornerRadius: 10))
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.rule))
             }
+            Button("加一段") { edit { $0.sections.append(ArticleSection(heading: "", body: "")) } }
+                .buttonStyle(GhostButton())
         }
     }
 
@@ -446,6 +474,9 @@ struct ArticleDetail: View {
 
     /// 红线 1：全仓唯一能写 published 的入口
     func markPublished() {
+        editing = false
+        confirmingRegen = false
+        showTitles = false
         edit { $0.published = true }
         Theme.tap()
     }

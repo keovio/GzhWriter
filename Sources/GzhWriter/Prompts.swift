@@ -118,7 +118,10 @@ enum Prompts {
     }
 
     static func section(_ a: Article, index: Int, style: StylePreset?, words: Int = 400, ref: Breakdown? = nil, mats: [Material] = []) -> [ChatMessage] {
-        let all = a.outline.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        // 大纲被单独删过行时和正文节数对不上，以正文各节小标题为准，避免下标越界闪退
+        let plan = (a.outline.count == a.sections.count || a.sections.isEmpty) ? a.outline : a.sections.map(\.heading)
+        let all = plan.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        let cur = index >= 0 && index < plan.count ? plan[index] : ""
         let done = a.sections.prefix(index).map { "· \($0.heading)：\($0.body.prefix(80))…" }.joined(separator: "\n")
         return [.system(base + styleBlock(style)), .user("""
         文章标题：\(a.title)
@@ -130,9 +133,9 @@ enum Prompts {
 
         \(done.isEmpty ? "" : "前面已经写好的部分（保持衔接，不要重复）：\n\(done)\n")
         \(materialsBlock(mats))
-        现在只写第 \(index + 1) 部分：\(a.outline[index])
+        现在只写第 \(index + 1) 部分：\(cur)
         \(ArticleKind.of(a.kind).writeRule)
-        \(ref.map { $0.guide + (index == 0 ? "这是第一部分，用上面的开头手法。" : (index == a.outline.count - 1 ? "这是最后一部分，用上面的结尾手法。" : "")) } ?? "")
+        \(ref.map { $0.guide + (index == 0 ? "这是第一部分，用上面的开头手法。" : (index == plan.count - 1 ? "这是最后一部分，用上面的结尾手法。" : "")) } ?? "")
 
         要求：\(max(200, words - 80)) 到 \(words + 120) 字；段落之间空一行；每段不超过 4 行；可以用 **加粗** 标出一两句关键句，可以用「> 」开头写一句引用。
         不要写小标题，只输出这部分的正文。

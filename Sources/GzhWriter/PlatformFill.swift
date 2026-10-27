@@ -13,14 +13,75 @@ enum PlatformFill {
     }
 
     /// 每个账号单独的登录状态。每个平台的第一个号沿用原来的登录（老版本登过的不用重登）。
+    /// 老版本的登录（.default()）固定归第一次用到时排第一的号，之后不再按列表顺序推断，
+    /// 免得删掉第一个号后，下一个号「继承」被删号的登录。
     static func dataStore(_ acc: Account?) -> WKWebsiteDataStore {
-        guard let acc, let store = Store.shared else { return .default() }
-        if store.accounts(on: acc.platform).first?.id == acc.id { return .default() }
+        guard let acc else { return .default() }
+        if defaultOwner(acc.platform) == acc.id { return .default() }
         if #available(macOS 14.0, *) { return WKWebsiteDataStore(forIdentifier: acc.id) }
-        return .default()
+        return .nonPersistent()          // 只有 needsMacOS14 时会走到，入口处已经拦住
+    }
+
+    static func defaultOwner(_ platform: String) -> UUID? {
+        let key = "webStoreDefaultOwner.\(platform)"
+        if let s = UserDefaults.standard.string(forKey: key), let id = UUID(uuidString: s) { return id }
+        guard let first = Store.shared?.accounts(on: platform).first else { return nil }
+        UserDefaults.standard.set(first.id.uuidString, forKey: key)
+        return first.id
+    }
+
+    /// macOS 13 不支持每个号单独的登录：同平台第二个号起不能登录，免得和第一个号串号
+    static func needsMacOS14(_ acc: Account) -> Bool {
+        if #available(macOS 14.0, *) { return false }
+        return defaultOwner(acc.platform) != acc.id
+    }
+
+    static let macOS14Hint = "同一平台多个号要 macOS 14 以上才能分开登录"
+
+    static func alertNeedsMacOS14() {
+        let al = NSAlert()
+        al.messageText = macOS14Hint
+        al.runModal()
+    }
+
+    /// 删除账号时清掉它的 AppSecret 和网页登录
+    static func forget(_ acc: Account) {
+        Keychain.set("", for: acc.secretKey)
+        guard let p = Platform.of(acc.platform), p != .wechat else { return }
+        let domain = sessionCookies(p).domain
+        if defaultOwner(acc.platform) == acc.id {
+            let ds = WKWebsiteDataStore.default()
+            ds.fetchDataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()) { recs in
+                ds.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+                              for: recs.filter { $0.displayName.hasSuffix(domain) }) {}
+            }
+            // macOS 13 上只有这一个登录位，让下一个号接手（已清空，需要重新登录）
+            if #available(macOS 14.0, *) {} else {
+                UserDefaults.standard.removeObject(forKey: "webStoreDefaultOwner.\(acc.platform)")
+            }
+        } else if #available(macOS 14.0, *) {
+            let ds = WKWebsiteDataStore(forIdentifier: acc.id)
+            ds.fetchDataRecords(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes()) { recs in
+                ds.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), for: recs) {}
+            }
+        }
+    }
+
+    /// 窗口关掉时：移除通知、停掉计时器、拆掉网页，免得关掉的窗口一直在后台跑
+    private static func onClose(_ w: NSWindow, _ extra: @escaping @MainActor () -> Void) {
+        let box = ObserverBox()
+        box.token = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak w] _ in
+            if let t = box.token { NotificationCenter.default.removeObserver(t); box.token = nil }
+            Task { @MainActor in
+                extra()
+                windows.removeAll { $0 === w }
+                w?.contentView = nil
+            }
+        }
     }
 
     static func open(store: Store, articleId: UUID, platform: String, account: Account? = nil) {
+        if let acc = account, needsMacOS14(acc) { alertNeedsMacOS14(); return }
         guard let a = store.article(articleId), let v = a.variants[platform] else { return }
         let model = FillModel(article: a, variant: v, platform: platform)
         model.dataStore = dataStore(account)
@@ -33,14 +94,13 @@ enum PlatformFill {
         w.center()
         w.makeKeyAndOrderFront(nil)
         windows.append(w)
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
-            Task { @MainActor in windows.removeAll { $0 === w } }
-        }
+        onClose(w) { model.stop() }
     }
 
     /// 只打开平台去登录（登录状态会记住，之后填稿、存草稿不用再登）
     static func login(_ acc: Account) {
         guard let p = Platform.of(acc.platform) else { return }
+        if needsMacOS14(acc) { alertNeedsMacOS14(); return }
         let model = LoginModel(account: acc, store: dataStore(acc))
         let host = NSHostingView(rootView: LoginView(model: model))
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820),
@@ -52,11 +112,9 @@ enum PlatformFill {
         w.makeKeyAndOrderFront(nil)
         model.window = w
         windows.append(w)
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
-            Task { @MainActor in
-                windows.removeAll { $0 === w }
-                NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
-            }
+        onClose(w) {
+            model.stop()
+            NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
         }
     }
 
@@ -86,6 +144,7 @@ enum PlatformFill {
 
     static func isLoggedIn(_ acc: Account) async -> Bool {
         guard let p = Platform.of(acc.platform) else { return false }
+        guard !needsMacOS14(acc) else { return false }
         return await isLoggedIn(dataStore(acc), p)
     }
 
@@ -96,6 +155,7 @@ enum PlatformFill {
     /// closeWhenDone：批量时存好自动关窗口接着下一篇；单篇存好后窗口留着，可以直接检查、发布。
     static func saveDraft(store: Store, articleId: UUID, account acc: Account, closeWhenDone: Bool = false) async throws -> String {
         guard let p = Platform.of(acc.platform), draftable(p) else { throw DraftError.msg("这个平台不支持存草稿") }
+        guard !needsMacOS14(acc) else { throw DraftError.msg(macOS14Hint) }
         guard await isLoggedIn(acc) else { throw DraftError.msg("「\(acc.name)」还没登录\(p.name)，先在「我的账号」点登录") }
         if store.article(articleId)?.variants[p.rawValue] == nil {
             try await Publisher.makeVariants(store, articleId, only: [p])
@@ -115,12 +175,10 @@ enum PlatformFill {
         w.makeKeyAndOrderFront(nil)
         windows.append(w)
         let flag = CloseFlag()
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+        onClose(w) {
             flag.closed = true
-            Task { @MainActor in
-                windows.removeAll { $0 === w }
-                model.onDone?(.failure(DraftError.msg("窗口被关掉了，没存上")))
-            }
+            model.stop()
+            model.onDone?(.failure(DraftError.msg("窗口被关掉了，没存上")))
         }
         let result: Result<String, Error> = await withCheckedContinuation { c in
             var resumed = false
@@ -131,7 +189,7 @@ enum PlatformFill {
             }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 90_000_000_000)
-                model.onDone?(.failure(DraftError.msg(model.filled ? "填好了但没找到存草稿按钮，可以在窗口里自己点" : "90 秒没打开编辑器，可能登录过期了")))
+                model.onDone?(.failure(DraftError.msg(model.filled ? FillModel.manualSaveHint : "90 秒没打开编辑器，可能登录过期了")))
             }
         }
         let closedByUser = flag.closed
@@ -164,6 +222,11 @@ enum PlatformFill {
           var e = els[j];
           var t = (e.innerText || '').replace(/\\s+/g, '');
           if (!re.test(t) || e.children.length > 2) continue;
+          var inner = false;
+          for (var k = 0; k < e.children.length; k++) {
+            if ((e.children[k].innerText || '').replace(/\\s+/g, '') === t) { inner = true; break; }
+          }
+          if (inner) continue;   // 点最里层的按钮，不点外面包着的 div
           var r = e.getBoundingClientRect();
           if (r.width < 4 || r.height < 4) continue;
           e.click();
@@ -171,7 +234,20 @@ enum PlatformFill {
         }
       }
       var txt = document.body ? document.body.innerText : '';
-      if (/(草稿已保存|已保存|保存成功|自动保存)/.test(txt)) return 'saved';
+      if (/(草稿已保存|已自动保存|已保存|保存成功)/.test(txt)) return 'saved';
+      return 'none';
+    })()
+    """
+
+    /// 页面上有没有真正「已保存」的提示（不认「内容将自动保存」这种静态说明）
+    static let savedScript = """
+    (function() {
+      var docs = [document];
+      document.querySelectorAll('iframe').forEach(function(f) { try { if (f.contentDocument) docs.push(f.contentDocument); } catch (e) {} });
+      for (var i = 0; i < docs.length; i++) {
+        var txt = docs[i].body ? docs[i].body.innerText : '';
+        if (/(草稿已保存|已自动保存|已保存|保存成功|存草稿成功)/.test(txt)) return 'saved';
+      }
       return 'none';
     })()
     """
@@ -281,6 +357,10 @@ enum PlatformFill {
           if (title.tagName === 'TEXTAREA' || title.tagName === 'INPUT') { setVal(title, T); }
           else { title.focus(); title.textContent = T; title.dispatchEvent(new InputEvent('input', { bubbles: true })); }
           body.focus();
+          try {   // 先全选编辑器里已有的内容，粘贴时替换而不是追加
+            var sel = bodyDoc.getSelection(), rg = bodyDoc.createRange();
+            rg.selectNodeContents(body); sel.removeAllRanges(); sel.addRange(rg);
+          } catch (e) {}
           var done = false;
           try {
             var dt = new DataTransfer();
@@ -325,13 +405,37 @@ final class FillModel: ObservableObject {
     weak var web: WKWebView?
     private var tries = 0
     private var timer: Timer?
+    private var filling = false
+    private var stopped = false
+    static let manualSaveHint = "已填好，请在窗口里手动点保存"
+
+    private var cachedJS: String?
+
+    /// 填入脚本只拼一次（配图转 base64 很大，不要每 2 秒在主线程重算）；变体标题为空时用文章标题
+    private func fillScript() -> String {
+        if let js = cachedJS { return js }
+        let js = PlatformFill.script(
+            title: variant.title.isEmpty ? article.displayTitle : variant.title,
+            html: PlatformFill.bodyHTML(article, variant),
+            plain: variant.body.isEmpty ? Publisher.platformPlain(article, variant) : Publisher.platformFull(article, variant))
+        cachedJS = js
+        return js
+    }
 
     init(article: Article, variant: PlatformVariant, platform: String) {
         self.article = article; self.variant = variant; self.platform = platform
     }
 
+    /// 窗口关掉时调用：停计时器、停网页加载
+    func stop() {
+        stopped = true
+        timer?.invalidate(); timer = nil
+        web?.stopLoading()
+    }
+
     /// 页面加载后每 2 秒找一次编辑器，找到就自动填一次
     func startWatching() {
+        guard !stopped else { return }
         timer?.invalidate()
         tries = 0
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -347,18 +451,20 @@ final class FillModel: ObservableObject {
     }
 
     func fill(auto: Bool = false) {
-        guard let web else { return }
-        let js = PlatformFill.script(title: variant.title,
-                                     html: PlatformFill.bodyHTML(article, variant),
-                                     plain: variant.body.isEmpty ? Publisher.platformPlain(article, variant) : Publisher.platformFull(article, variant))
+        // 上一次还没跑完、或自动轮询时已经填过，就不再填，免得正文粘两遍
+        guard let web, !stopped, !filling, !(auto && filled) else { return }
+        filling = true
+        let js = fillScript()
         web.evaluateJavaScript(js) { [weak self] result, error in
             Task { @MainActor in
                 guard let self else { return }
+                self.filling = false
                 let r = result as? String ?? ""
                 if r == "ok" {
+                    let first = !self.filled
                     self.filled = true
                     self.timer?.invalidate()
-                    if self.autoDraft {
+                    if self.autoDraft && first {
                         self.status = "已填好标题和正文，正在存草稿…"
                         self.saveDraftSoon()
                     } else {
@@ -382,16 +488,19 @@ extension FillModel {
         }
     }
 
+    /// 只有在页面上真看到「已保存」一类提示才算存好；拿不准就请作者自己点保存
     private func tryDraft() {
-        guard let web else { return }
+        guard let web, !stopped else { return }
         web.evaluateJavaScript(PlatformFill.draftScript) { [weak self] result, _ in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self, !self.stopped else { return }
                 let r = result as? String ?? ""
-                if r == "clicked" || r == "saved" {
-                    // 给平台几秒把草稿存下来
+                if r == "saved" {
+                    self.onDone?(.success("平台已自动存草稿"))
+                } else if r == "clicked" {
+                    // 给平台几秒把草稿存下来，再看有没有保存成功的提示
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
-                    self.onDone?(.success(r == "clicked" ? "已存草稿" : "平台已自动存草稿"))
+                    self.confirmSaved()
                 } else {
                     self.retryDraft()
                 }
@@ -399,15 +508,26 @@ extension FillModel {
         }
     }
 
+    private func confirmSaved() {
+        guard let web = self.web, !stopped else { return }
+        web.evaluateJavaScript(PlatformFill.savedScript) { [weak self] result, _ in
+            Task { @MainActor in
+                guard let self else { return }
+                if (result as? String) == "saved" {
+                    self.onDone?(.success("已存草稿"))
+                } else {
+                    self.onDone?(.failure(DraftError.msg(FillModel.manualSaveHint)))
+                }
+            }
+        }
+    }
+
     private func retryDraft() {
+        guard !stopped else { return }
         draftTries += 1
         if draftTries >= 5 {
-            // 头条、知乎编辑器会自动保存草稿，等够时间就算存好
-            if platform == "toutiao" || platform == "zhihu" {
-                onDone?(.success("平台自动存草稿"))
-            } else {
-                onDone?(.failure(DraftError.msg("填好了但没找到存草稿按钮")))
-            }
+            // 没找到存草稿按钮：头条、知乎可能会自动保存，先看页面上有没有真正的保存提示
+            confirmSaved()
             return
         }
         Task { @MainActor [weak self] in
@@ -418,6 +538,9 @@ extension FillModel {
 }
 
 final class CloseFlag: @unchecked Sendable { var closed = false }
+
+/// 存通知 token，窗口关掉后用它把观察者移除
+final class ObserverBox: @unchecked Sendable { var token: NSObjectProtocol? }
 
 enum DraftError: LocalizedError {
     case msg(String)
@@ -473,7 +596,7 @@ final class LoginModel: ObservableObject {
         NotificationCenter.default.post(name: .gzhLoginChanged, object: nil)
     }
 
-    func stop() { timer?.invalidate() }
+    func stop() { timer?.invalidate(); timer = nil }
 
     /// 退出登录：清掉这个号的 cookie
     func logout() async {

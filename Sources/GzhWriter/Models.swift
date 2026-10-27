@@ -93,8 +93,14 @@ struct ReviewResult: Codable, Hashable {
     init() {}
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        scores = (try? c.decodeIfPresent([String: Int].self, forKey: .scores)) ?? [:]
-        total = (try? c.decodeIfPresent(Int.self, forKey: .total)) ?? 0
+        // 模型可能给小数或字符串分数，都换成整数，免得整项被当成 0 分
+        if let i = try? c.decodeIfPresent([String: Int].self, forKey: .scores) { scores = i }
+        else if let d = try? c.decodeIfPresent([String: Double].self, forKey: .scores) { scores = d.mapValues { Int($0.rounded()) } }
+        else if let t = try? c.decodeIfPresent([String: String].self, forKey: .scores) { scores = t.compactMapValues { Double($0).map { Int($0.rounded()) } } }
+        if let i = try? c.decodeIfPresent(Int.self, forKey: .total) { total = i }
+        else if let d = try? c.decodeIfPresent(Double.self, forKey: .total) { total = Int(d.rounded()) }
+        else if let t = try? c.decodeIfPresent(String.self, forKey: .total), let d = Double(t) { total = Int(d.rounded()) }
+        if total == 0, !scores.isEmpty { total = scores.values.reduce(0, +) / scores.count }
         summary = (try? c.decodeIfPresent(String.self, forKey: .summary)) ?? ""
         suggestions = (try? c.decodeIfPresent([Suggestion].self, forKey: .suggestions)) ?? []
         factChecks = (try? c.decodeIfPresent([String].self, forKey: .factChecks)) ?? []
@@ -342,6 +348,18 @@ struct ModelConnection: Identifiable, Codable, Hashable {
     var model: String
 }
 
+// 写在 extension 里，保留自动生成的逐成员 init
+extension ModelConnection {
+    enum CodingKeys: String, CodingKey { case id, name, baseURL, model }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        baseURL = (try? c.decode(String.self, forKey: .baseURL)) ?? ""
+        model = (try? c.decode(String.self, forKey: .model)) ?? ""
+    }
+}
+
 enum Role: String, Codable, CaseIterable, Identifiable {
     case topic, draft, review
     var id: String { rawValue }
@@ -360,6 +378,12 @@ enum Role: String, Codable, CaseIterable, Identifiable {
         case .review: return "审稿打分、标题多选、爆文拆解"
         }
     }
+}
+
+/// 逐条宽松解码：数组里一条坏记录只丢那一条，不拖累整组
+struct Lossy<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
 }
 
 struct AppData: Codable {
@@ -385,14 +409,14 @@ struct AppData: Codable {
         articles = (try? c.decode([Article].self, forKey: .articles)) ?? []
         ideas = (try? c.decode([TopicIdea].self, forKey: .ideas)) ?? []
         styles = (try? c.decode([StylePreset].self, forKey: .styles)) ?? []
-        connections = (try? c.decode([ModelConnection].self, forKey: .connections)) ?? []
+        connections = ((try? c.decode([Lossy<ModelConnection>].self, forKey: .connections)) ?? []).compactMap(\.value)
         roles = (try? c.decode([String: [UUID]].self, forKey: .roles)) ?? [:]
         roleModels = (try? c.decode([String: String].self, forKey: .roleModels)) ?? [:]
         auto = (try? c.decode(AutoSettings.self, forKey: .auto)) ?? AutoSettings()
         wechat = (try? c.decode(WechatSettings.self, forKey: .wechat)) ?? WechatSettings()
         breakdowns = (try? c.decode([Breakdown].self, forKey: .breakdowns)) ?? []
         materials = (try? c.decode([Material].self, forKey: .materials)) ?? []
-        accounts = (try? c.decode([Account].self, forKey: .accounts)) ?? []
+        accounts = ((try? c.decode([Lossy<Account>].self, forKey: .accounts)) ?? []).compactMap(\.value)
         hot = (try? c.decode([HotArticle].self, forKey: .hot)) ?? []
         hotNames = (try? c.decode([String: String].self, forKey: .hotNames)) ?? [:]
     }
@@ -505,7 +529,10 @@ struct TitleOption: Identifiable, Codable, Hashable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         title = (try? c.decode(String.self, forKey: .title)) ?? ""
         style = (try? c.decode(String.self, forKey: .style)) ?? ""
-        score = (try? c.decode(Int.self, forKey: .score)) ?? 0
+        if let i = try? c.decode(Int.self, forKey: .score) { score = i }
+        else if let d = try? c.decode(Double.self, forKey: .score) { score = Int(d.rounded()) }
+        else if let t = try? c.decode(String.self, forKey: .score), let d = Double(t) { score = Int(d.rounded()) }
+        else { score = 0 }
         reason = (try? c.decode(String.self, forKey: .reason)) ?? ""
     }
 }
@@ -595,4 +622,17 @@ struct Account: Identifiable, Codable, Hashable {
         return index <= 1 ? base : "\(base) \(index)"
     }
     var isDefaultName: Bool { name.isEmpty || name.hasPrefix("我的" + (Platform.of(platform)?.name ?? "账号")) }
+}
+
+// 写在 extension 里，保留自动生成的逐成员 init
+extension Account {
+    enum CodingKeys: String, CodingKey { case id, platform, name, styleId, appId }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        platform = (try? c.decode(String.self, forKey: .platform)) ?? "wechat"
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        styleId = (try? c.decodeIfPresent(UUID.self, forKey: .styleId)) ?? nil
+        appId = (try? c.decode(String.self, forKey: .appId)) ?? ""
+    }
 }

@@ -155,8 +155,9 @@ final class Store: ObservableObject {
 
     /// 推草稿箱用哪个公众号：稿件自己的号 → 同风格的公众号 → 第一个配好了的公众号
     func wechatAccount(for a: Article) -> Account? {
+        // 稿件自己就是公众号：只用它，没填 AppID 就返回 nil 提示去填，不偷偷换成别的号
+        if let acc = account(a.accountId), acc.platform == "wechat" { return acc.appId.isEmpty ? nil : acc }
         let wx = accounts(on: "wechat").filter { !$0.appId.isEmpty }
-        if let acc = account(a.accountId), acc.platform == "wechat", !acc.appId.isEmpty { return acc }
         return wx.first { $0.styleId == a.styleId } ?? wx.first
     }
 
@@ -289,6 +290,14 @@ final class Store: ObservableObject {
         }
     }
 
+    /// 退出前立刻落盘：save() 有 0.5 秒合并延迟，刚改完就 ⌘Q 会丢最后一下
+    func flush() {
+        guard saveTask != nil else { return }
+        saveTask?.cancel()
+        saveTask = nil
+        Self.write(data)
+    }
+
     static func write(_ d: AppData) {
         // 硬闸：解码失败的那次会话，任何一次 save 都不许落到 data.json
         guard !writeBlocked else { return }
@@ -374,6 +383,7 @@ final class Store: ObservableObject {
         let conns = connections(for: role)
         guard !conns.isEmpty else { throw LLMError.noConnection }
         var errors: [String] = []
+        var retryable = false
         for c in conns {
             calling = "\(c.name)（\(c.model)）"
             defer { calling = nil }
@@ -381,9 +391,10 @@ final class Store: ObservableObject {
                 return try await LLM.chat(c, messages: messages, temperature: temperature)
             } catch {
                 errors.append("· \(c.name)：\(error.localizedDescription)")
+                retryable = retryable || Pipeline.transient(error)
             }
         }
-        throw LLMError.allFailed(errors)
+        throw LLMError.allFailed(errors, retryable: retryable)
     }
 
     func runJSON<T: Decodable>(_ role: Role, _ type: T.Type, _ messages: [ChatMessage]) async throws -> T {

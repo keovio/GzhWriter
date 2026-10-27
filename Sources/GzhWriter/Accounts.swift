@@ -29,7 +29,11 @@ struct AccountsView: View {
         }
         .confirmationDialog("删除这个账号？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("删除", role: .destructive) {
-                if let r = removing { store.data.accounts.removeAll { $0.id == r.id }; store.save() }
+                if let r = removing {
+                    PlatformFill.forget(r)
+                    store.data.accounts.removeAll { $0.id == r.id }
+                    store.save()
+                }
                 removing = nil
             }
         } message: {
@@ -148,6 +152,11 @@ struct AccountsView: View {
         Keychain.set(s, for: acc.secretKey)
         Wechat.shared.reset()
         let id = (store.account(acc.id)?.appId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        // 存回去掉空格的 AppID，免得推草稿时带着空格出错
+        if let i = store.data.accounts.firstIndex(where: { $0.id == acc.id }), store.data.accounts[i].appId != id {
+            store.data.accounts[i].appId = id
+            store.save()
+        }
         tested[acc.id] = nil
         busy.run("正在连接「\(acc.name)」…") {
             do {

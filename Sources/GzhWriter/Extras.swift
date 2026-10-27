@@ -66,9 +66,13 @@ enum Compliance {
         let th = hits.filter { $0.section == -1 }
         if !th.isEmpty {
             log("标题有不合规用语，改一下")
-            var t = a.title
-            for h in th { t = t.replacingOccurrences(of: h.word, with: "") }
-            store.update(id) { $0.title = t.trimmingCharacters(in: .whitespaces) }
+            // 让模型改写标题，直接删词会把标题删成病句
+            let msgs: [ChatMessage] = [.system(Prompts.base), .user("把这个公众号标题里的不合规说法改成合规表达，意思和长度尽量不变，只输出新标题：\n\(a.title)\n\(fixInstruction(th))")]
+            let raw = try await store.run(.draft, msgs)
+            let nt = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "「」\"《》"))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !nt.isEmpty, nt.count <= 40, !nt.contains("\n") { store.update(id) { $0.title = nt } }
         }
         for (idx, list) in Dictionary(grouping: hits.filter { $0.section >= 0 }, by: \.section).sorted(by: { $0.key < $1.key }) {
             guard let cur = store.article(id), idx < cur.sections.count else { continue }
@@ -106,8 +110,11 @@ enum Dedupe {
         let x = bigrams(a), y = bigrams(b)
         guard !x.isEmpty, !y.isEmpty else { return 0 }
         let inter = Double(x.intersection(y).count)
-        // 用较短的一方做分母，短标题被长标题包含也算像
-        return inter / Double(min(x.count, y.count))
+        // 用较短的一方做分母，短标题被长标题包含也算像；
+        // 但太短的一方（一两个字）改用 Dice，避免「AI」「考公」这种标题「包含」一切
+        let small = min(x.count, y.count)
+        if small < 4 { return 2 * inter / Double(x.count + y.count) }
+        return inter / Double(small)
     }
     static let threshold = 0.6
 

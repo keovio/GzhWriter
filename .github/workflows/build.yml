@@ -2,11 +2,11 @@ name: Build Mac
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 concurrency:
-  group: build
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p shots
-          for p in workbench radar library accounts styles publish models; do
+          for p in workbench library settings; do
             GZH_DEMO=1 GZH_PANE=$p ./build/GzhWriter.app/Contents/MacOS/GzhWriter > /dev/null 2>&1 &
             PID=$!
             sleep 9
@@ -144,6 +144,8 @@ jobs:
             windows/dist/*.deb
 
   release:
+    # dev 分支只编译+截图，不发版
+    if: github.ref == 'refs/heads/main'
     needs: [mac]
     runs-on: ubuntu-latest
     steps:

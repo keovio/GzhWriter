@@ -295,16 +295,16 @@ struct TopicsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 if loadingHot && visibleRows.isEmpty {
                     skeleton
-                } else if visibleRows.isEmpty && otherRows.isEmpty {
+                } else if visibleRows.isEmpty {
                     emptyState
                 } else if domain == "全部" {
                     ForEach(visibleRows) { r in FlowRowView(row: r, similar: similarTo(r.title), use: { use(r) }, openSimilar: { openSimilar(r.title) }) }
                 } else {
-                    sectionTitle("\(domain) · 热榜 \(hotRows.count) 条")
-                    ForEach(hotRows) { r in FlowRowView(row: r, similar: similarTo(r.title), use: { use(r) }, openSimilar: { openSimilar(r.title) }) }
-                    if !otherRows.isEmpty {
-                        sectionTitle("其他来源 \(otherRows.count) 条")
-                        ForEach(otherRows) { r in FlowRowView(row: r, similar: similarTo(r.title), use: { use(r) }, openSimilar: { openSimilar(r.title) }) }
+                    sectionTitle("\(domain) · 热榜 \(filteredHotRows.count) 条")
+                    ForEach(filteredHotRows) { r in FlowRowView(row: r, similar: similarTo(r.title), use: { use(r) }, openSimilar: { openSimilar(r.title) }) }
+                    if !filteredOtherRows.isEmpty {
+                        sectionTitle("其他来源 \(filteredOtherRows.count) 条")
+                        ForEach(filteredOtherRows) { r in FlowRowView(row: r, similar: similarTo(r.title), use: { use(r) }, openSimilar: { openSimilar(r.title) }) }
                     }
                 }
             }
@@ -366,7 +366,7 @@ struct TopicsView: View {
     var otherRows: [FlowRow] {
         var out: [FlowRow] = []
         let hotTitles = Set(hotItems.map(\.title))
-        for idea in store.data.ideas {
+        for idea in store.data.ideas where !idea.used {
             let src: FlowRow.Source = idea.origin == "ai" ? .ai : (idea.origin == "hot" ? .hot : .manual)
             // 同一标题既在 live 热榜、又在 ideas（origin == "hot"）里，只显示一行，优先 live 那条
             if src == .hot && hotTitles.contains(idea.title) { continue }
@@ -381,14 +381,15 @@ struct TopicsView: View {
     }
 
     /// 领域为「全部」时一条流；否则热榜在前、其他来源在后
-    var visibleRows: [FlowRow] {
-        var base: [FlowRow] = hotRows + otherRows
-        if domain != "全部" {
-            base = hotRows.filter { $0.category == domain } + otherRows
-        }
-        if onlyNew { base = base.filter { similarTo($0.title).isEmpty } }
-        return base
+    var filteredHotRows: [FlowRow] {
+        var r = domain == "全部" ? hotRows : hotRows.filter { $0.category == domain }
+        if onlyNew { r = r.filter { similarTo($0.title).isEmpty } }
+        return r
     }
+    var filteredOtherRows: [FlowRow] {
+        onlyNew ? otherRows.filter { similarTo($0.title).isEmpty } : otherRows
+    }
+    var visibleRows: [FlowRow] { filteredHotRows + filteredOtherRows }
 
     func similarTo(_ title: String) -> String {
         let pool = store.data.articles.flatMap { [$0.displayTitle, $0.topic] }.filter { !$0.isEmpty }
@@ -417,7 +418,8 @@ struct TopicsView: View {
         loadingHot = true
         await radar.autoRefresh()
         loadingHot = false
-        offline = hotItems.isEmpty
+        // 只有真去拉过、拉完还是空的，才提示网络
+        offline = store.data.auto.hotAuto && !radar.loading && hotItems.isEmpty
     }
 
     func run() {
@@ -472,10 +474,14 @@ struct TopicsView: View {
                 Button { split() } label: { Text("拆解") }
                     .buttonStyle(PrimaryButton())
                     .disabled(busy.label != nil || pasted.trimmingCharacters(in: .whitespacesAndNewlines).count < 100)
+                if busy.label != nil { ProgressView().controlSize(.small) }
                 if !note.isEmpty {
                     Text(note).font(.system(size: 12)).foregroundStyle(Theme.orange).lineLimit(2)
                 }
                 Spacer()
+            }
+            if let e = busy.error {
+                Text(e).font(.system(size: 12)).foregroundStyle(Theme.orange).lineLimit(3)
             }
 
             if let r = result { resultView(r) }

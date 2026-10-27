@@ -248,7 +248,7 @@ enum Publisher {
         let w = store.data.wechat
         guard let acc = store.wechatAccount(for: a), !Wechat.secret(appId: acc.appId, store: store).isEmpty
         else { throw WechatError.notConfigured }
-        let appId = acc.appId
+        let appId = acc.appId.trimmingCharacters(in: .whitespacesAndNewlines)
         let style = store.style(a.styleId)
         let api = Wechat.shared
 
