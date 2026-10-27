@@ -366,8 +366,8 @@ struct PlanView: View {
                 .help(posted ? "\(p.name)已发，点一下取消" : "发完\(p.name)点一下标记")
             }
             if !a.published {
-                Button("公众号发了") { store.update(a.id) { $0.published = true } }.buttonStyle(GhostButton())
-                Button("取消") { store.update(a.id) { $0.scheduled = nil } }.buttonStyle(LinkButton(color: Theme.sub))
+                // 发布日历界面一期已删（§5-7），PlanView 不再挂载；这里不再提供写 published 的入口（红线 1：全仓唯一入口在稿件页「标为已发」）
+                Button("取消排期") { store.update(a.id) { $0.scheduled = nil } }.buttonStyle(LinkButton(color: Theme.sub))
             }
         }
     }

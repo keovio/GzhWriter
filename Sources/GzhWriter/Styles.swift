@@ -54,9 +54,25 @@ struct StylesView: View {
     @State private var showSample = false
     @State private var confirmDelete = false
 
+    /// 嵌进设置页右栏时为 true：不自己包 Page（避免嵌套滚动）
+    var embedded = false
+
     var body: some View {
-        Page(maxWidth: 900) {
-            PageHeader(title: "风格", subtitle: "填定位、给几篇范文，AI 总结出这个号的写法，之后写稿都照它来。") {
+        Group {
+            if embedded { inner } else { Page(maxWidth: 900) { inner } }
+        }
+        .onAppear { if selected == nil { selected = store.data.styles.first?.id } }
+        .onChange(of: selected) { _ in note = ""; editingGuide = false; link = "" }
+        .confirmationDialog("删除风格「\(selectedName)」？", isPresented: $confirmDelete) {
+            Button("删除", role: .destructive) { deleteSelected() }
+        } message: {
+            Text("用这套风格的账号和稿件会改用「\(fallbackName)」。")
+        }
+    }
+
+    @ViewBuilder var inner: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            PageHeader(title: "风格", subtitle: "填定位、给几篇范文，AI 总结出这个号的写法，之后写稿都照它来。", compact: embedded) {
                 Button {
                     let s = StylePreset(name: "新风格")
                     store.data.styles.append(s); store.save(); selected = s.id
@@ -79,13 +95,6 @@ struct StylesView: View {
                 guideCard(b)
                 signature(b)
             }
-        }
-        .onAppear { if selected == nil { selected = store.data.styles.first?.id } }
-        .onChange(of: selected) { _ in note = ""; editingGuide = false; link = "" }
-        .confirmationDialog("删除风格「\(selectedName)」？", isPresented: $confirmDelete) {
-            Button("删除", role: .destructive) { deleteSelected() }
-        } message: {
-            Text("用这套风格的账号和稿件会改用「\(fallbackName)」。")
         }
     }
 

@@ -236,6 +236,7 @@ struct BatchBar: View {
                     Button {
                         modelJob("改敏感词") { id in _ = try await Compliance.autoFix(store, id) { s in store.update(id) { $0.log.append(s) } } }
                     } label: { Label("改敏感词", systemImage: "exclamationmark.shield") }
+                    // 一期禁用：此按钮会写 scheduled，仅当 LibraryView 重新挂载时才可能被点到（见 Workbench.swift:78 注释）。
                     Button {
                         let n = Batch.schedule(store, ids)
                         say(n == 0 ? "选中的都已排过或已发布" : "排进日历 \(n) 篇，按发布时间每天一篇")

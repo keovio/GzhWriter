@@ -62,6 +62,11 @@ enum Humanize {
     }
 }
 
+/// 用户点了「停止」：在步骤边界抛出，把这一篇从生成里摘出来
+struct PipelineStopped: LocalizedError {
+    var errorDescription: String? { "已停止" }
+}
+
 /// 一键成稿：选题 → 大纲 → 正文 → 自审 → 不及格自动返修 → 排版。只生成本地草稿，不发布。
 @MainActor
 final class Pipeline: ObservableObject {
@@ -73,6 +78,8 @@ final class Pipeline: ObservableObject {
     private var queue: [(String, UUID?, UUID?, UUID?, String, UUID?)] = []   // 方向、账号、参考拆解、要续写的稿件
     private var working = false
     private var fresh: Set<UUID> = []        // 刚建好、还没开始写的稿件
+    /// 用户点了停止的稿件。只在步骤边界生效，不掐正在飞的网络请求
+    private var cancelled: Set<UUID> = []
     @Published var focus: UUID?              // 点了写一篇：跳到这篇稿件看它写
     private var timer: Timer?
 
@@ -84,9 +91,10 @@ final class Pipeline: ObservableObject {
             && !(a.log.last ?? "").contains("完成") {
             store.update(a.id) { $0.failed = "上次没写完（软件被关了或中断）" }
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkDaily(); self?.checkReminders() }
-        }
+        // 一期停用（规格 §6.2 红线 1 / §5-9）：定时生产与发布提醒的界面已删，
+        // checkDaily / checkReminders 函数留着但不调用，避免后台每天自动写稿、到点弹「该发文章了」。
+        // 恢复时把下面这行换回 Task { @MainActor in self?.checkDaily(); self?.checkReminders() }
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in }
     }
 
     var queued: Int { queue.count }
@@ -120,9 +128,24 @@ final class Pipeline: ObservableObject {
         return ids
     }
 
+    /// 停止生成：到下一个步骤边界生效（最多等一步）。已写内容保留、stage 不动、不弹通知
+    func stop(_ id: UUID) {
+        cancelled.insert(id)
+        if running[id] != nil { running[id] = "正在停止…" }
+        store.update(id) { $0.failed = "已停止" }
+    }
+
+    /// 每一步开头调用：用户点了停止就抛出去
+    private func checkStop(_ id: UUID) throws {
+        if cancelled.contains(id) { throw PipelineStopped() }
+    }
+
+    var isCancelled: (UUID) -> Bool { { [weak self] in self?.cancelled.contains($0) ?? false } }
+
     /// 从出错的地方接着写：已经写好的选题、大纲、段落都保留
     func resume(_ id: UUID) {
         guard running[id] == nil, !queue.contains(where: { $0.3 == id }), let a = store.article(id) else { return }
+        cancelled.remove(id)
         store.update(id) { $0.failed = "" }
         running[id] = "排队中，等前面的写完"
         queue.append((a.topic, a.styleId, a.refId, id, a.primary, a.accountId))
@@ -139,6 +162,7 @@ final class Pipeline: ObservableObject {
             if let rid {
                 // 稿件被删了就跳过
                 guard store.article(rid) != nil else { running[rid] = nil; fresh.remove(rid); continue }
+                if cancelled.contains(rid) { running[rid] = nil; fresh.remove(rid); continue }
                 let isNew = fresh.remove(rid) != nil
                 await work(rid, direction: dir, styleId: sid, refId: ref, resumed: !isNew)
             }
@@ -199,6 +223,10 @@ final class Pipeline: ObservableObject {
                 store.update(id) { $0.failed = "" }
                 if lastError != nil, failedArticles.isEmpty { lastError = nil }
                 break
+            } catch is PipelineStopped {
+                // 用户点了停止：不走失败分支、不弹通知、不清已写内容
+                log(id, "已停止")
+                break
             } catch {
                 let msg = error.localizedDescription
                 if attempt == 0 { step = running[id] ?? "" }
@@ -216,6 +244,7 @@ final class Pipeline: ObservableObject {
             }
         }
         running[id] = nil
+        cancelled.remove(id)
     }
 
     /// 没填 Key、地址不对这种，重试也没用
@@ -239,6 +268,7 @@ final class Pipeline: ObservableObject {
         do {
           if store.article(id)?.sections.isEmpty ?? true,
              let cur = store.article(id), !resumed || cur.viewpoint.isEmpty {
+            try checkStop(id)
             // 1 选题
             log(id, "选题")
             var hotTitles: [String] = []
@@ -293,6 +323,7 @@ final class Pipeline: ObservableObject {
                 if !mats.isEmpty { log(id, "用上 \(mats.count) 条素材") }
             }
 
+            try checkStop(id)
             // 2 大纲
             guard let a1 = store.article(id) else { return }
             if a1.sections.isEmpty {
@@ -307,6 +338,7 @@ final class Pipeline: ObservableObject {
             }
             }
 
+            try checkStop(id)
             // 3 正文（已经写好的部分跳过）
             let n = max(1, store.article(id)?.sections.count ?? 1)
             let per = max(250, settings.targetWords / n)
@@ -318,6 +350,7 @@ final class Pipeline: ObservableObject {
                 store.update(id) { if i < $0.sections.count { $0.sections[i].body = Humanize.clean(text) } }
             }
 
+            try checkStop(id)
             // 4 自审 + 返修
             var round = 0
             var best: (score: Int, sections: [ArticleSection], review: ReviewResult)?
@@ -366,9 +399,11 @@ final class Pipeline: ObservableObject {
                 } catch { log(id, "标题生成出错：\(error.localizedDescription)") }
             }
 
+            try checkStop(id)
             // 5 排版
             store.update(id) { $0.stage = .layout }
 
+            try checkStop(id)
             // 6 配图、各平台版本（出错不影响稿件本身）
             if settings.images {
                 do { try await Publisher.makeImages(store, id) { self.log(id, $0) } }
@@ -385,6 +420,7 @@ final class Pipeline: ObservableObject {
                 catch { log(id, "平台版本出错：\(error.localizedDescription)") }
             }
 
+            try checkStop(id)
             // 7 推公众号草稿箱（只存草稿，不发表）
             var pushed = false
             if main == "wechat", store.data.wechat.autoPush, let art = store.article(id), store.wechatAccount(for: art) != nil {
@@ -392,12 +428,8 @@ final class Pipeline: ObservableObject {
                 catch { log(id, "推草稿箱失败：\(error.localizedDescription)") }
             }
 
-            // 8 排进发布日历
-            var when = ""
-            if settings.autoSchedule, let slot = PublishPlan.schedule(store, id) {
-                when = PublishPlan.label(slot)
-                log(id, "排到 \(when) 发布，到点提醒你")
-            }
+            // 8 排进发布日历 —— 一期停用：不写 scheduled、不弹提醒（§6.2 红线）
+            let when = ""
 
             let score = store.article(id)?.review?.total ?? 0
             log(id, "完成，\(score) 分，等你过目")

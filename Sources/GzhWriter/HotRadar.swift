@@ -829,7 +829,7 @@ struct RadarView: View {
 
     func addIdea(_ h: HotArticle) {
         let angle = h.isWechat ? "参考热文（\(h.reads) 阅读），换自己的角度写" : "\(HotSource.name(h.platform))热榜话题，找和自己赛道相关的角度"
-        store.data.ideas.insert(TopicIdea(title: h.title, angle: angle), at: 0)
+        store.data.ideas.insert(TopicIdea(title: h.title, angle: angle, origin: "hot"), at: 0)
         store.save()
         done.insert("i" + h.id)
     }

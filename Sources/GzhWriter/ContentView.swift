@@ -2,37 +2,34 @@ import AppKit
 import SwiftUI
 
 enum Pane: Hashable {
-    case workbench, ideas, library, radar, breakdown, materials, plan, styles, models, auto, publish, accounts
-    case article(UUID)
+    /// 三项：工作台（= 题材流，case 名沿用 compose）/ 稿件 / 设置
+    /// 稿件详情不再是独立 pane：改成稿件页右栏的局部状态（§3.1 真分栏）
+    case compose, articles, settings
 }
 
 struct ContentView: View {
-    /// CI 截图用：GZH_PANE=radar 之类，直接打开那一页
+    /// CI 截图用：GZH_PANE=topics 之类，直接打开那一页。
+    /// 旧页名保留映射，避免 CI 脚本与本地截图命令一起失效。
     static var startPane: Pane {
         switch ProcessInfo.processInfo.environment["GZH_PANE"] ?? "" {
-        case "radar": return .radar
-        case "ideas": return .ideas
-        case "breakdown": return .breakdown
-        case "library": return .library
-        case "plan": return .plan
-        case "accounts": return .accounts
-        case "styles": return .styles
-        case "materials": return .materials
-        case "models": return .models
-        case "publish": return .publish
-        case "auto": return .auto
-        default: return .workbench
+        case "compose", "workbench", "topics", "ideas", "radar", "breakdown": return .compose
+        case "articles", "library": return .articles
+        case "settings", "models", "accounts", "styles", "publish", "auto", "materials": return .settings
+        default: return .compose
         }
     }
 
     @EnvironmentObject var store: Store
     @EnvironmentObject var pipeline: Pipeline
     @State private var pane: Pane = ContentView.startPane
-    @State private var back: Pane = .workbench
+    /// 稿件页右栏选中哪一篇
+    @State private var selected: UUID?
+    /// 小红书 / 微博这类短内容仍是整页（不套分栏）
+    @State private var shortId: UUID?
 
     var body: some View {
         HStack(spacing: 0) {
-            Sidebar(pane: $pane, newArticle: newArticle)
+            Sidebar(pane: $pane, newArticle: newArticle, openArticle: open)
                 .frame(width: 216)
             Rectangle().fill(Theme.rule).frame(width: 1)
             detail
@@ -45,46 +42,36 @@ struct ContentView: View {
         .onChange(of: pipeline.focus) { id in
             if let id { open(id); pipeline.focus = nil }
         }
-        .onAppear { if store.data.connections.isEmpty && ProcessInfo.processInfo.environment["GZH_PANE"] == nil { pane = .models } }
+        .sheet(isPresented: Binding(get: { shortId != nil }, set: { if !$0 { shortId = nil } })) {
+            if let id = shortId {
+            ShortArticleView(articleId: id, close: { shortId = nil })
+                .frame(minWidth: 760, minHeight: 620)
+            }
+        }
     }
 
+    /// 四页各自只有一页，顶部切换条已取消（§1：HubTabs 删除）
     var detail: some View {
-        VStack(spacing: 0) {
-            if let g = NavGroup.of(pane), g.tabs.count > 1 {
-                HubTabs(group: g, pane: $pane)
-            }
-            page.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        page.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder var page: some View {
         switch pane {
-        case .workbench: WorkbenchView(open: open)
-        case .ideas: IdeasView(open: open)
-        case .library: LibraryView(open: open)
-        case .radar: RadarView()
-        case .breakdown: BreakdownView()
-        case .materials: MaterialsView()
-        case .plan: PlanView(open: open)
-        case .styles: StylesView()
-        case .accounts: AccountsView()
-        case .models: ModelsView()
-        case .auto: AutoSettingsView()
-        case .publish: PublishSettingsView()
-        case .article(let id):
-            if let a = store.article(id), a.isShort {
-                ShortArticleView(articleId: id, close: { pane = back }).id(id)
-            } else if store.article(id) != nil {
-                ArticleEditor(articleId: id, close: { pane = back }).id(id)
-            } else {
-                Page { Text("稿件已删除").foregroundStyle(Theme.sub) }
-            }
+        case .compose: TopicsView(open: open, goArticles: { pane = .articles })
+        case .articles: ArticlePage(selected: $selected)
+        case .settings: SettingsShell()
         }
     }
 
+    /// 打开一篇：短内容（小红书/微博）还是整页编辑器，长文进稿件页右栏
     func open(_ id: UUID) {
-        if case .article = pane {} else { back = pane }
-        pane = .article(id)
+        guard let a = store.article(id) else { return }
+        if a.isShort {
+            shortId = id
+        } else {
+            selected = id
+            pane = .articles
+        }
     }
 
     func newArticle() { open(store.newArticle()) }
@@ -95,6 +82,7 @@ struct Sidebar: View {
     @EnvironmentObject var pipeline: Pipeline
     @Binding var pane: Pane
     var newArticle: () -> Void
+    var openArticle: (UUID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -113,14 +101,25 @@ struct Sidebar: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(NavGroup.allCases, id: \.self) { g in
-                        SideItem(title: g.name, icon: g.icon, on: NavGroup.of(pane) == g, badge: badge(g)) { pane = g.tabs[0].1 }
+                    ForEach(NavItem.all, id: \.pane) { n in
+                        SideItem(title: n.name, icon: n.icon, on: pane == n.pane, badge: badge(n)) { pane = n.pane }
                     }
 
                     if !recent.isEmpty {
                         group("最近")
                         ForEach(recent) { a in
-                            item(a.displayTitle, pipeline.running[a.id] != nil ? "hourglass" : "doc", .article(a.id))
+                            Button { openArticle(a.id) } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: pipeline.running[a.id] != nil ? "hourglass" : "doc")
+                                        .font(.system(size: 13)).frame(width: 18)
+                                    Text(a.displayTitle).font(.system(size: 13)).lineLimit(1)
+                                    Spacer()
+                                }
+                                .foregroundStyle(Theme.ink.opacity(0.88))
+                                .padding(.horizontal, 10).padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(RowButton())
                         }
                     }
                 }
@@ -137,16 +136,14 @@ struct Sidebar: View {
         .background(Theme.sidebar)
     }
 
-    func badge(_ g: NavGroup) -> String? {
-        switch g {
-        case .home: return pipeline.running.isEmpty ? (pipeline.failedArticles.isEmpty ? nil : "!") : "\(pipeline.running.count)"
-        case .articles: return upcoming == 0 ? nil : "\(upcoming)"
+    func badge(_ n: NavItem) -> String? {
+        switch n.pane {
+        case .compose: return pipeline.running.isEmpty ? (pipeline.failedArticles.isEmpty ? nil : "!") : "\(pipeline.running.count)"
         case .settings: return store.data.connections.isEmpty ? "!" : nil
-        case .hot, .writing: return nil
+        case .articles: return nil
         }
     }
 
-    var upcoming: Int { store.data.articles.filter { $0.scheduled != nil && !$0.published }.count }
     var openIdeas: Int { store.data.ideas.filter { !$0.used }.count }
     var recent: [Article] { Array(store.data.articles.prefix(5)) }
 
@@ -197,68 +194,15 @@ struct SideItem: View {
 }
 
 
-/// 侧栏只有四项，每项里面用顶部标签切换
-enum NavGroup: CaseIterable {
-    case home, hot, articles, writing, settings
+/// 侧栏三项，一页一件事（§1.3）
+struct NavItem {
+    let name: String
+    let icon: String
+    let pane: Pane
 
-    var name: String {
-        switch self {
-        case .home: return "工作台"
-        case .hot: return "选题"
-        case .articles: return "稿件"
-        case .writing: return "我的账号"
-        case .settings: return "设置"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .home: return "square.grid.2x2"
-        case .hot: return "flame"
-        case .articles: return "doc.text"
-        case .writing: return "person.text.rectangle"
-        case .settings: return "gearshape"
-        }
-    }
-
-    var tabs: [(String, Pane)] {
-        switch self {
-        case .home: return [("工作台", .workbench)]
-        case .hot: return [("热点雷达", .radar), ("选题库", .ideas), ("爆文拆解", .breakdown)]
-        case .articles: return [("全部稿件", .library), ("发布日历", .plan)]
-        case .writing: return [("账号", .accounts), ("风格", .styles), ("素材库", .materials)]
-        case .settings: return [("模型", .models), ("发布", .publish), ("自动化", .auto)]
-        }
-    }
-
-    static func of(_ p: Pane) -> NavGroup? {
-        allCases.first { g in g.tabs.contains { $0.1 == p } }
-    }
-}
-
-struct HubTabs: View {
-    let group: NavGroup
-    @Binding var pane: Pane
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(group.tabs, id: \.0) { name, p in
-                Button { pane = p } label: {
-                    Text(name)
-                        .font(.system(size: 13, weight: pane == p ? .semibold : .regular))
-                        .foregroundStyle(pane == p ? Theme.navy : Theme.sub)
-                        .padding(.horizontal, 14).padding(.vertical, 10)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(pane == p ? AnyShapeStyle(Theme.brand) : AnyShapeStyle(Color.clear)).frame(height: 2)
-                        }
-                }
-                .buttonStyle(RowButton())
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 28)
-        .padding(.top, 30)
-        .background(Theme.sheet)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.rule).frame(height: 1) }
-    }
+    static let all: [NavItem] = [
+        NavItem(name: "工作台", icon: "flame", pane: .compose),
+        NavItem(name: "稿件", icon: "doc.text", pane: .articles),
+        NavItem(name: "设置", icon: "gearshape", pane: .settings),
+    ]
 }

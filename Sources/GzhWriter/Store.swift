@@ -7,13 +7,29 @@ final class Store: ObservableObject {
     @Published var data = AppData()
     /// 正在调用的模型（界面上显示「正在用 xx」）
     @Published var calling: String?
+    /// 数据文件读不出来时的提示。非 nil 表示本次启动是「空数据 + 不写盘」状态
+    @Published var loadError: String?
     private var saveTask: Task<Void, Never>?
+
+    /// 硬闸：解码失败的那次会话里一次都不许写盘，否则会把用户的坏文件顶成空数据。
+    /// 这是第二层保险，第一层是 load() 里把原文件 move 走。
+    static var writeBlocked = false
 
     static var folder: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("GzhWriter", isDirectory: true)
     }
     static var file: URL { folder.appendingPathComponent("data.json") }
+    /// 「上次启动出过事」的持久化凭据。解码失败时把文案写进来，重启后靠它认出这次不是首次启动。
+    /// 光放内存不行：move 走原文件后 data.json 位置是空的，下次启动会走「首次启动」分支静默吃空数据。
+    static var loadErrorFile: URL { folder.appendingPathComponent("load-error.txt") }
+    /// 第二凭据：上次损坏备份的文件名，用户在警示条上点过「我知道了」的记这里。
+    /// 为什么需要：load-error.txt 本身可能写不进去（磁盘满/权限/同名目录占位），
+    /// 那时靠扫 data.corrupt-*.json 兜底；但备份永不自动删除，若不加这个记录，
+    /// 用户点过确认之后每次重启都会再被拦一次。
+    static var loadAckFile: URL { folder.appendingPathComponent("load-acked.txt") }
+    /// 本次会话的提示若来自某个损坏备份，记下文件名，点确认时写进 load-acked.txt
+    static var pendingCorruptBackup: String?
 
     static weak var shared: Store?
 
@@ -23,7 +39,17 @@ final class Store: ObservableObject {
         if data.styles.isEmpty {
             data.styles = [StylePreset(name: "我的公众号", sample: "", avoid: "")]
         }
+        // 测试钩子：模拟用户点「我知道了，开始新文档」。无头环境点不了按钮，
+        // 但按钮 action 调的就是这个函数，走的是同一条路径（删凭据 → 解闸 → 清提示）。
+        // 放在 demo() 之前，这样配合 GZH_DEMO 就能验证「解除后能正常写盘」。
+        // 只在 debug 构建生效：这是绕过按钮直接关掉数据保护的开关，正式包里不能留。
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["GZH_ACK_LOAD_ERROR"] != nil { clearLoadError() }
+        #endif
+        // demo 数据只在 debug 构建里造，正式包启动就是用户的真实数据
+        #if DEBUG
         if ProcessInfo.processInfo.environment["GZH_DEMO"] != nil { demo() }
+        #endif
         migrateAccounts()
         renameStyleNamedAccounts()
     }
@@ -134,15 +160,126 @@ final class Store: ObservableObject {
         return wx.first { $0.styleId == a.styleId } ?? wx.first
     }
 
+    /// 诊断日志：凭据类文件静默写失败，是出事故后最难查的东西——文件没了、日志也没有，
+    /// 只能猜。所以这几处写失败一律留痕（走系统日志，用户看不到，管家和测试能查到）。
+    /// 注意：留痕不等于改变行为，写失败该怎么降级还是怎么降级，方向只能是「多拦一次」。
+    static func note(_ msg: String) {
+        NSLog("[GzhWriter] %@", msg)
+    }
+
+    /// 目录里最新的一份损坏备份，但用户还没确认过的。没有就返回 nil。
+    /// 已确认过的记在 load-acked.txt，备份文件本身永不自动删除（用户可能要手动找回原稿）。
+    static func latestUnackedBackup() -> String? {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { return nil }
+        let corrupt = names.filter { $0.hasPrefix("data.corrupt-") && $0.hasSuffix(".json") }
+        guard !corrupt.isEmpty else { return nil }
+        let acked = (try? String(contentsOf: loadAckFile, encoding: .utf8)) ?? ""
+        let ackedSet = Set(acked.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) })
+        // 判据是「任何一份 corrupt 不在 ack 名单里就拦」，不是「最新那份在不在名单里」。
+        // 只看最新一份会漏掉这种情况：旧备份 A 没确认过、新备份 B 确认过 → 最新是 B → 放行，
+        // 可 A 里躺着的原稿就再也没人提起了（V34）。
+        let unacked = corrupt.filter { !ackedSet.contains($0) }
+        guard !unacked.isEmpty else { return nil }
+        // 文案用 mtime 最新的那份未确认备份（用户最可能记得的是最近这次事故）
+        return unacked.compactMap { n -> (String, Date)? in
+            let p = folder.appendingPathComponent(n)
+            guard let m = (try? fm.attributesOfItem(atPath: p.path))?[.modificationDate] as? Date else { return nil }
+            return (n, m)
+        }.max { $0.1 < $1.1 }?.0 ?? unacked.first
+    }
+
+    /// 从凭据文案里抠出备份文件名（文案形如「…原文件已备份为 data.corrupt-123.json，…」）。
+    /// 只在扫目录拿不到时兜底：move 失败时文案里没有文件名，返回 nil。
+    static func backupName(in text: String) -> String? {
+        let marker = "data.corrupt-"
+        guard let r = text.range(of: marker) else { return nil }
+        let rest = text[r.lowerBound...]
+        guard let end = rest.range(of: ".json") else { return nil }
+        return String(rest[..<end.upperBound])
+    }
+
     func load() {
-        guard let d = try? Data(contentsOf: Self.file) else { return }
+        // 文件不存在 = 首次启动，正常以空数据开始。
+        // 但先看一眼上次有没有出过事：解码失败时原文件被 move 走了，data.json 位置是空的，
+        // 这一行会和首次启动长得一模一样。不读凭据的话，重启后就会静默吃空数据并且正常写盘。
+        guard FileManager.default.fileExists(atPath: Self.file.path) else {
+            if let prev = try? String(contentsOf: Self.loadErrorFile, encoding: .utf8),
+               !prev.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Self.writeBlocked = true
+                loadError = prev
+                // 走 txt 分支也要记下是哪份备份：否则用户点确认时 ack 不落盘，
+                // 删掉 data.json 重启又会被同一份备份拦住（V30）。
+                // 优先扫目录拿最新的未确认备份；扫不到（move 失败、或 txt 是旧的）
+                // 就从凭据文案里把文件名抠出来。
+                Self.pendingCorruptBackup = Self.latestUnackedBackup() ?? Self.backupName(in: prev)
+                return
+            }
+            // 凭据文件读不到，还有第二种可能：上次解码失败时 load-error.txt 根本写不进去
+            // （磁盘满、权限、同名目录占位都等价）。这时 data.json 位置是空的、
+            // 凭据也是空的，光看这两样和「首次启动」完全一样。
+            // 兜底：扫目录里有没有损坏备份，有就说明确实出过事，照样拦。
+            if let backup = Self.latestUnackedBackup() {
+                Self.writeBlocked = true
+                Self.pendingCorruptBackup = backup
+                loadError = "发现上次数据损坏时留下的备份 \(backup)，本次仍以空数据启动、不会写盘。原稿在那份备份文件里，确认后可以手动恢复。"
+            }
+            return
+        }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        if let v = try? dec.decode(AppData.self, from: d) { data = v; data.hot.removeAll { $0.platform == "douyin" } }
+        do {
+            let d = try Data(contentsOf: Self.file)
+            var v = try dec.decode(AppData.self, from: d)
+            v.hot.removeAll { $0.platform == "douyin" }
+            data = v
+        } catch {
+            // 读盘或解码失败：第一层保险 —— 把原文件整个 move 走留档，
+            // Self.file 位置空出来，后续 save() 写的是新文件，原数据一定还在。
+            let stamp = Int(Date().timeIntervalSince1970)
+            let keep = Self.folder.appendingPathComponent("data.corrupt-\(stamp).json")
+            let moved = (try? FileManager.default.moveItem(at: Self.file, to: keep)) != nil
+            // 第二层保险：本次会话一律不写盘
+            Self.writeBlocked = true
+            // move 成功时也记下备份名：万一凭据文件写不进去（磁盘满/权限），
+            // 重启后靠第二凭据扫描能认出这次出过事；点确认时也能把「已确认」落盘，
+            // 免得凭据没了、备份还在，导致用户点完确认重启又被拦一次。
+            if moved { Self.pendingCorruptBackup = "data.corrupt-\(stamp).json" }
+            let msg = moved
+                ? "数据文件读不出来（\(error.localizedDescription)）。原文件已备份为 data.corrupt-\(stamp).json，本次以空数据启动，不会覆盖它。"
+                : "数据文件读不出来（\(error.localizedDescription)），备份也失败了。为免覆盖原文件，本次启动不写入任何数据。"
+            loadError = msg
+            // 第三层：把「出过事」落盘。move 成功后 data.json 位置是空的，下次启动看起来和首次启动一样，
+            // 只有这份凭据能让重启后的会话继续提示、继续不写盘。
+            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+            // 写失败不致命（拦截靠扫备份兜），但要留痕：静默失败的凭据是排查事故时最难看的东西
+            do { try msg.write(to: Self.loadErrorFile, atomically: true, encoding: .utf8) }
+            catch { Self.note("凭据 load-error.txt 写入失败：\(error.localizedDescription)（不影响拦截，靠扫 corrupt 备份兜）") }
+        }
+    }
+
+    /// 用户在警示条上点「我知道了」：唯一解除写盘闸的方式，必须手动点。
+    /// 删凭据 → 解除闸 → 清提示，此后正常保存（用户已知情并选择继续用）。
+    func clearLoadError() {
+        // 如果这次的提示来自某份损坏备份，先把「已确认过它」记下来，
+        // 否则备份文件还在，下次启动会被第二凭据再拦一次，用户会以为永远解除不掉。
+        if let backup = Self.pendingCorruptBackup {
+            let old = (try? String(contentsOf: Self.loadAckFile, encoding: .utf8)) ?? ""
+            var lines = old.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if !lines.contains(backup) { lines.append(backup) }
+            try? FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
+            do { try lines.joined(separator: "\n").write(to: Self.loadAckFile, atomically: true, encoding: .utf8) }
+            catch { Self.note("确认记录 load-acked.txt 写入失败：\(error.localizedDescription)（后果是下次启动多拦一次，不丢数据）") }
+            Self.pendingCorruptBackup = nil
+        }
+        try? FileManager.default.removeItem(at: Self.loadErrorFile)
+        Self.writeBlocked = false
+        loadError = nil
     }
 
     /// 改动后 0.5 秒落盘（合并连续输入）；写之前留一份 .bak
     func save() {
+        guard !Self.writeBlocked else { return }
         saveTask?.cancel()
         let snapshot = data
         saveTask = Task { [weak self] in
@@ -153,6 +290,8 @@ final class Store: ObservableObject {
     }
 
     static func write(_ d: AppData) {
+        // 硬闸：解码失败的那次会话，任何一次 save 都不许落到 data.json
+        guard !writeBlocked else { return }
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601

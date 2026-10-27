@@ -22,7 +22,7 @@ struct GzhWriterApp: App {
                 .environmentObject(store)
                 .environmentObject(pipeline)
                 .environmentObject(radar)
-                .frame(minWidth: 1180, minHeight: 740)
+                .frame(minWidth: 1081, minHeight: 740)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

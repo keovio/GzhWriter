@@ -219,6 +219,22 @@ struct TopicIdea: Identifiable, Codable, Hashable {
     var angle: String = ""
     var created = Date()
     var used = false
+    /// 这条哪来的：manual = 我记的（老数据默认）、ai = AI 候选、hot = 从热榜记下来的
+    var origin: String = "manual"
+
+    enum CodingKeys: String, CodingKey { case id, title, angle, created, used, origin }
+    init(title: String, angle: String = "", origin: String = "manual") {
+        self.title = title; self.angle = angle; self.origin = origin
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        angle = (try? c.decode(String.self, forKey: .angle)) ?? ""
+        created = (try? c.decode(Date.self, forKey: .created)) ?? Date()
+        used = (try? c.decode(Bool.self, forKey: .used)) ?? false
+        origin = (try? c.decode(String.self, forKey: .origin)) ?? "manual"
+    }
 }
 
 /// 口吻：一篇或几篇作者自己的范文 + 不写的话题
@@ -273,7 +289,7 @@ struct AutoSettings: Codable, Hashable {
     var autoTitle = true        // 自动出 5 个标题并换上最高分的
     var autoCompliance = true   // 自动改掉敏感词
     var useMaterials = true     // 写稿时自动用上素材库里相关的素材
-    var autoSchedule = true     // 写好自动排进发布日历
+    var autoSchedule = false    // 写好自动排进发布日历（一期停用，见 §6.2）
     var publishDays: [Int] = [2, 4, 6]   // 1=周日 … 7=周六
     var publishHour = 20
     var publishMinute = 0
@@ -293,7 +309,7 @@ struct AutoSettings: Codable, Hashable {
         maxRounds = (try? c.decode(Int.self, forKey: .maxRounds)) ?? d.maxRounds
         useHot = (try? c.decode(Bool.self, forKey: .useHot)) ?? d.useHot
         targetWords = (try? c.decode(Int.self, forKey: .targetWords)) ?? d.targetWords
-        dailyEnabled = (try? c.decode(Bool.self, forKey: .dailyEnabled)) ?? d.dailyEnabled
+        dailyEnabled = false    // 一期强制停用：定时生产界面已删，老数据存着 true 也不生效（§6.2）
         dailyHour = (try? c.decode(Int.self, forKey: .dailyHour)) ?? d.dailyHour
         dailyMinute = (try? c.decode(Int.self, forKey: .dailyMinute)) ?? d.dailyMinute
         dailyStyleId = try? c.decodeIfPresent(UUID.self, forKey: .dailyStyleId)
@@ -305,7 +321,7 @@ struct AutoSettings: Codable, Hashable {
         autoTitle = (try? c.decode(Bool.self, forKey: .autoTitle)) ?? d.autoTitle
         autoCompliance = (try? c.decode(Bool.self, forKey: .autoCompliance)) ?? d.autoCompliance
         useMaterials = (try? c.decode(Bool.self, forKey: .useMaterials)) ?? d.useMaterials
-        autoSchedule = (try? c.decode(Bool.self, forKey: .autoSchedule)) ?? d.autoSchedule
+        autoSchedule = false    // 一期强制停用：老数据里存着 true 也不生效（§6.2）
         publishDays = (try? c.decode([Int].self, forKey: .publishDays)) ?? d.publishDays
         publishHour = (try? c.decode(Int.self, forKey: .publishHour)) ?? d.publishHour
         publishMinute = (try? c.decode(Int.self, forKey: .publishMinute)) ?? d.publishMinute

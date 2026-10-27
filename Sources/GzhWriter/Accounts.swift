@@ -15,9 +15,31 @@ struct AccountsView: View {
         }
     }
 
+    /// 嵌进设置页右栏时为 true：不自己包 Page（避免嵌套滚动）
+    var embedded = false
+
     var body: some View {
-        Page(maxWidth: 900) {
-            PageHeader(title: "我的账号", subtitle: "每个平台可以有几个号，每个号只登录一次，之后会一直记住。") {
+        Group {
+            if embedded { inner } else { Page(maxWidth: 900) { inner } }
+        }
+        .onAppear {
+            for a in store.data.accounts where a.platform == "wechat" {
+                secrets[a.id] = Keychain.get(a.secretKey) ?? ""
+            }
+        }
+        .confirmationDialog("删除这个账号？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+            Button("删除", role: .destructive) {
+                if let r = removing { store.data.accounts.removeAll { $0.id == r.id }; store.save() }
+                removing = nil
+            }
+        } message: {
+            Text("只删账号设置，写过的稿件不受影响。")
+        }
+    }
+
+    @ViewBuilder var inner: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            PageHeader(title: "我的账号", subtitle: "每个平台可以有几个号，每个号只登录一次，之后会一直记住。", compact: embedded) {
                 Menu {
                     ForEach(Platform.allCases) { p in
                         Button(p.name) { add(p) }
@@ -50,19 +72,6 @@ struct AccountsView: View {
                 }
             }
             BusyBar(busy: busy)
-        }
-        .onAppear {
-            for a in store.data.accounts where a.platform == "wechat" {
-                secrets[a.id] = Keychain.get(a.secretKey) ?? ""
-            }
-        }
-        .confirmationDialog("删除这个账号？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
-            Button("删除", role: .destructive) {
-                if let r = removing { store.data.accounts.removeAll { $0.id == r.id }; store.save() }
-                removing = nil
-            }
-        } message: {
-            Text("只删账号设置，写过的稿件不受影响。")
         }
     }
 

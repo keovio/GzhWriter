@@ -3,3 +3,6 @@ build/
 .swiftpm/
 *.xcuserstate
 .DS_Store
+.build/
+# 文档不进版本库（与简历平台一致），只留在磁盘
+docs/

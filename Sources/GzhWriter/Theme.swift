@@ -189,13 +189,19 @@ struct ScoreBadge: View {
 struct PageHeader<Trailing: View>: View {
     let title: String
     var subtitle: String = ""
+    /// 嵌在设置页右栏时用紧凑版：标题 15 semibold + 说明 12 faint（§4.1）
+    var compact = false
     @ViewBuilder var trailing: Trailing
     var body: some View {
         HStack(alignment: .bottom) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.ink)
+            VStack(alignment: .leading, spacing: compact ? 3 : 4) {
+                Text(title)
+                    .font(.system(size: compact ? 15 : 22, weight: compact ? .semibold : .bold))
+                    .foregroundStyle(Theme.ink)
                 if !subtitle.isEmpty {
-                    Text(subtitle).font(.system(size: 13)).foregroundStyle(Theme.sub)
+                    Text(subtitle)
+                        .font(.system(size: compact ? 12 : 13))
+                        .foregroundStyle(compact ? Theme.faint : Theme.sub)
                 }
             }
             Spacer()
@@ -205,8 +211,8 @@ struct PageHeader<Trailing: View>: View {
 }
 
 extension PageHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String = "") {
-        self.title = title; self.subtitle = subtitle; self.trailing = EmptyView()
+    init(title: String, subtitle: String = "", compact: Bool = false) {
+        self.title = title; self.subtitle = subtitle; self.compact = compact; self.trailing = EmptyView()
     }
 }
 

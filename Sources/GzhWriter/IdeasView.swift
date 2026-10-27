@@ -78,7 +78,7 @@ struct IdeasView: View {
     func addManual() {
         let t = manual.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        store.data.ideas.insert(TopicIdea(title: t), at: 0)
+        store.data.ideas.insert(TopicIdea(title: t, origin: "manual"), at: 0)
         store.save()
         manual = ""
     }
@@ -96,7 +96,7 @@ struct IdeasView: View {
             for i in r.ideas {
                 if let near = Dedupe.closest(i.title, in: pool), near.1 >= Dedupe.threshold { continue }
                 pool.append(i.title)
-                fresh.append(TopicIdea(title: i.title, angle: i.angle ?? ""))
+                fresh.append(TopicIdea(title: i.title, angle: i.angle ?? "", origin: "ai"))
             }
             store.data.ideas.insert(contentsOf: fresh, at: 0)
             store.save()
